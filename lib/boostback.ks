@@ -1,0 +1,225 @@
+// =========================================================================
+// BOOSTBACK LIBRARY (boostback.ks)
+// =========================================================================
+// RTLS boostback guidance and control
+// =========================================================================
+
+@LAZYGLOBAL OFF.
+
+RUNONCEPATH("0:/lib/util.ks").
+RUNONCEPATH("0:/lib/guidance.ks").
+
+// =========================================================================
+// FLIP MANEUVER
+// =========================================================================
+
+// Execute flip to retrograde orientation
+FUNCTION execute_flip {
+    PARAMETER max_flip_time IS 10.
+
+    log_message("Executing flip maneuver...").
+
+    // Enable RCS for flip
+    RCS ON.
+
+    LOCAL flip_start IS TIME:SECONDS.
+    LOCK STEERING TO RETROGRADE.
+
+    WAIT UNTIL VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR) < 5 OR
+               (TIME:SECONDS - flip_start) > max_flip_time.
+
+    LOCAL flip_time IS TIME:SECONDS - flip_start.
+
+    IF VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR) < 5 {
+        log_message("Flip complete in " + ROUND(flip_time, 1) + " seconds").
+        RETURN TRUE.
+    }
+    ELSE {
+        log_message("WARNING: Flip timeout. Angle error: " +
+                   ROUND(VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR), 1) + " degrees").
+        RETURN FALSE.
+    }
+}
+
+// =========================================================================
+// BOOSTBACK BURN
+// =========================================================================
+
+// Execute boostback burn to return to target landing zone
+FUNCTION execute_boostback {
+    PARAMETER target_latlng, max_burn_time IS 60, target_error IS 500.
+
+    log_message("Starting boostback burn...").
+    log_message("Target: LAT=" + ROUND(target_latlng:LAT, 4) + " LON=" + ROUND(target_latlng:LNG, 4)).
+
+    LOCAL start_time IS TIME:SECONDS.
+    LOCAL error_integral IS 0.
+
+    // PID tuning parameters
+    LOCAL kp IS 0.5.
+    LOCAL ki IS 0.1.
+
+    LOCK STEERING TO RETROGRADE.
+
+    UNTIL (TIME:SECONDS - start_time) > max_burn_time {
+        // Predict where we'll land with current trajectory
+        LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+
+        // Calculate error (distance from target)
+        LOCAL error_distance IS great_circle_distance(predicted_impact, target_latlng).
+
+        // Display progress
+        IF MOD(FLOOR(TIME:SECONDS - start_time), 5) = 0 {
+            PRINT "Boostback: " + ROUND(TIME:SECONDS - start_time, 0) + "s, Error: " +
+                  ROUND(error_distance, 0) + "m          " AT(0, 15).
+        }
+
+        // Stop if within acceptable range
+        IF error_distance < target_error {
+            LOCK THROTTLE TO 0.
+            log_message("Boostback complete. Error: " + ROUND(error_distance, 0) + "m").
+            log_message("Predicted impact: LAT=" + ROUND(predicted_impact:LAT, 4) +
+                       " LON=" + ROUND(predicted_impact:LNG, 4)).
+            RETURN TRUE.
+        }
+
+        // Calculate steering direction toward target
+        LOCAL target_bearing IS bearing_to_target(predicted_impact, target_latlng).
+        LOCAL correction_vector IS heading_vector(target_bearing, 0).
+
+        // Blend retrograde and correction based on error magnitude
+        LOCAL blend_factor IS MIN(1.0, error_distance / 5000).
+        LOCAL steer_vec IS ((1 - blend_factor) * RETROGRADE:VECTOR +
+                            blend_factor * correction_vector):NORMALIZED.
+
+        LOCK STEERING TO steer_vec.
+
+        // PI throttle control
+        LOCAL throttle_p IS MIN(1.0, error_distance / 5000) * kp.
+        SET error_integral TO error_integral + error_distance * 0.1.  // dt = 0.1s
+        LOCAL throttle_i IS error_integral * ki.
+        LOCAL throttle_val IS MIN(1.0, MAX(0.1, throttle_p + throttle_i)).
+
+        LOCK THROTTLE TO throttle_val.
+
+        WAIT 0.1.
+    }
+
+    LOCK THROTTLE TO 0.
+    log_message("Boostback timeout. Landing downrange.").
+
+    LOCAL final_prediction IS predict_current_impact(120, 1.0).
+    LOCAL final_error IS great_circle_distance(final_prediction, target_latlng).
+    log_message("Final error: " + ROUND(final_error, 0) + "m").
+
+    RETURN FALSE.
+}
+
+// =========================================================================
+// BOOSTBACK ASSESSMENT
+// =========================================================================
+
+// Check if boostback burn is needed
+FUNCTION assess_boostback_needed {
+    PARAMETER target_latlng, threshold_distance IS 2000.
+
+    // Predict impact with no boostback
+    LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+    LOCAL distance IS great_circle_distance(predicted_impact, target_latlng).
+
+    log_message("Predicted impact distance: " + ROUND(distance, 0) + "m").
+
+    IF distance > threshold_distance {
+        log_message("Boostback required.").
+        RETURN TRUE.
+    }
+    ELSE {
+        log_message("On target - boostback not needed.").
+        RETURN FALSE.
+    }
+}
+
+// Estimate required boostback delta-V
+FUNCTION estimate_boostback_dv {
+    PARAMETER target_latlng.
+
+    // Simple estimate: distance to target / burn efficiency
+    // This is a rough approximation
+
+    LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+    LOCAL distance IS great_circle_distance(predicted_impact, target_latlng).
+
+    // Estimate efficiency factor (how much horizontal distance per m/s dV)
+    LOCAL efficiency IS 10.  // Very rough estimate: 10m per m/s
+
+    LOCAL estimated_dv IS distance / efficiency.
+
+    RETURN estimated_dv.
+}
+
+// Check if vessel has enough fuel for boostback
+FUNCTION check_boostback_fuel {
+    PARAMETER required_dv.
+
+    // Get current delta-V capacity
+    LOCAL current_dv IS get_vessel_deltav().
+
+    IF current_dv > required_dv * 1.5 {
+        // 1.5x safety margin
+        RETURN TRUE.
+    }
+
+    log_message("WARNING: Low fuel for boostback. Have " + ROUND(current_dv, 0) +
+               " m/s, need ~" + ROUND(required_dv, 0) + " m/s").
+
+    RETURN FALSE.
+}
+
+// Estimate vessel delta-V (simplified)
+FUNCTION get_vessel_deltav {
+    // Very simplified delta-V calculation
+    // dV = Isp * g0 * ln(m_wet / m_dry)
+
+    LOCAL total_fuel_mass IS 0.
+    FOR res IN SHIP:RESOURCES {
+        IF res:NAME = "LIQUIDFUEL" OR res:NAME = "OXIDIZER" {
+            SET total_fuel_mass TO total_fuel_mass + res:AMOUNT * res:DENSITY.
+        }
+    }
+
+    LOCAL wet_mass IS SHIP:MASS.
+    LOCAL dry_mass IS wet_mass - total_fuel_mass.
+
+    IF dry_mass <= 0 {
+        RETURN 0.
+    }
+
+    // Get average ISP
+    LOCAL avg_isp IS 0.
+    LOCAL engine_count IS 0.
+
+    LOCAL engines_collection IS LIST().
+    LIST ENGINES IN engines_collection.
+    FOR eng IN engines_collection {
+        SET avg_isp TO avg_isp + eng:ISP.
+        SET engine_count TO engine_count + 1.
+    }
+
+    IF engine_count > 0 {
+        SET avg_isp TO avg_isp / engine_count.
+    }
+    ELSE {
+        RETURN 0.
+    }
+
+    LOCAL g0 IS 9.80665.
+    LOCAL dv IS avg_isp * g0 * LN(wet_mass / dry_mass).
+
+    RETURN dv.
+}
+
+// =========================================================================
+// EXPORTS
+// =========================================================================
+
+GLOBAL boostback_loaded IS TRUE.

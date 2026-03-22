@@ -1,0 +1,16 @@
+# KSP Script temporary files
+*.log
+test_results.txt
+mission.log
+
+# kOS compiled files
+*.ksm
+
+# Editor files
+.vscode/
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
