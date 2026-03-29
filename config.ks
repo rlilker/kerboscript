@@ -7,8 +7,10 @@
 
 @LAZYGLOBAL OFF.
 
-// Load the utility foundation first (declares DEBUG_MODE, LOG_FILE, etc.)
+// Load the utility foundation (math, physics, ship utilities)
 RUNONCEPATH("0:/lib/util.ks").
+// Load the telemetry interface (tlog, tdebug, plog, HUD functions)
+RUNONCEPATH("0:/lib/telemetry.ks").
 
 // =========================================================================
 // DEBUG / LOGGING

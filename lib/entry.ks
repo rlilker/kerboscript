@@ -21,7 +21,7 @@ FUNCTION check_and_execute_entry_burn {
     IF SHIP:ALTITUDE < altitude_threshold AND
        SHIP:VELOCITY:SURFACE:MAG > speed_threshold {
 
-        log_message("Entry burn triggered - speed: " +
+        tlog("Entry burn triggered - speed: " +
                    ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s").
 
         execute_entry_burn().
@@ -35,7 +35,7 @@ FUNCTION check_and_execute_entry_burn {
 FUNCTION execute_entry_burn {
     PARAMETER burn_duration IS 5, throttle_level IS 0.3.
 
-    log_message("Executing entry burn...").
+    tlog("Executing entry burn...").
 
     LOCAL start_speed IS SHIP:VELOCITY:SURFACE:MAG.
     LOCAL start_time IS TIME:SECONDS.
@@ -50,7 +50,7 @@ FUNCTION execute_entry_burn {
     LOCAL end_speed IS SHIP:VELOCITY:SURFACE:MAG.
     LOCAL speed_reduction IS start_speed - end_speed.
 
-    log_message("Entry burn complete. Speed reduced by " +
+    tlog("Entry burn complete. Speed reduced by " +
                ROUND(speed_reduction, 0) + " m/s").
 }
 
@@ -69,13 +69,10 @@ FUNCTION manage_descent {
     IF SHIP:ALTITUDE < airbrake_altitude AND SHIP:ALTITUDE > 1000 {
         IF NOT BRAKES {
             deploy_airbrakes().
-            log_message("Airbrakes deployed at " + ROUND(SHIP:ALTITUDE/1000, 1) + " km").
+            tlog("Airbrakes deployed at " + ROUND(SHIP:ALTITUDE/1000, 1) + " km").
         }
     }
 
-    // Continuous telemetry display
-    PRINT "Altitude: " + ROUND(SHIP:ALTITUDE/1000, 1) + " km          " AT(0, 10).
-    PRINT "Speed: " + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s          " AT(0, 11).
 }
 
 // =========================================================================
@@ -86,7 +83,7 @@ FUNCTION manage_descent {
 FUNCTION coast_to_landing_altitude {
     PARAMETER landing_start_altitude IS 5000, target_latlng IS LATLNG(0, 0).
 
-    log_message("Coasting to landing altitude...").
+    tlog("Coasting to landing altitude...").
 
     // Enable RCS for stability
     RCS ON.
@@ -122,7 +119,7 @@ FUNCTION coast_to_landing_altitude {
         WAIT 0.1.
     }
 
-    log_message("Reached landing altitude: " + ROUND(get_true_altitude(), 0) + " m").
+    tlog("Reached landing altitude: " + ROUND(get_true_altitude(), 0) + " m").
 }
 
 // =========================================================================

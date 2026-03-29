@@ -97,11 +97,11 @@ FUNCTION setup_booster_processors {
     }
 
     IF booster_parts:LENGTH = 0 {
-        log_message("No booster processors found (set Name Tag to 'booster_N' in VAB)").
+        tlog("No booster processors found (set Name Tag to 'booster_N' in VAB)").
         RETURN.
     }
 
-    log_message("Arming " + booster_parts:LENGTH + " booster(s) with autoland_staging.ks...").
+    tlog("Arming " + booster_parts:LENGTH + " booster(s) with autoland_staging.ks...").
 
     FOR part IN booster_parts {
         LOCAL proc IS PROCESSOR(part:TAG).
@@ -111,7 +111,7 @@ FUNCTION setup_booster_processors {
         WAIT 0.1.
         SET proc:BOOTFILENAME TO "autoland_boot.ks".
         proc:ACTIVATE().
-        log_message("  " + part:TAG + " booted via stub").
+        tlog("  " + part:TAG + " booted via stub").
     }
 
     // Wait for READY from autoland_staging.ks on each booster
@@ -122,18 +122,18 @@ FUNCTION setup_booster_processors {
             LOCAL msg IS CORE:MESSAGES:POP.
             IF msg:CONTENT = "READY" {
                 SET boosters_ready TO boosters_ready + 1.
-                log_message("  READY (" + boosters_ready + "/" + booster_parts:LENGTH + ")").
+                tlog("  READY (" + boosters_ready + "/" + booster_parts:LENGTH + ")").
             }
         }
-        PRINT "Boosters armed: " + boosters_ready + "/" + booster_parts:LENGTH + "     " AT(0, 20).
+        PRINT "Boosters armed: " + boosters_ready + "/" + booster_parts:LENGTH + "     " AT(0, 9).
         WAIT 0.5.
     }
-    PRINT "                                          " AT(0, 20).
+    PRINT "                                          " AT(0, 9).
 
     IF boosters_ready < booster_parts:LENGTH {
-        log_message("WARNING: Only " + boosters_ready + "/" + booster_parts:LENGTH + " boosters ready").
+        tlog("WARNING: Only " + boosters_ready + "/" + booster_parts:LENGTH + " boosters ready").
     } ELSE {
-        log_message("All " + boosters_ready + " booster(s) armed and in standby").
+        tlog("All " + boosters_ready + " booster(s) armed and in standby").
     }
 
     FOR part IN booster_parts {
@@ -149,7 +149,7 @@ FUNCTION perform_staging {
     LOCAL next_stg IS get_next_booster_stage().
     LOCAL fuel_log IS "unknown".
     IF next_stg >= 0 { SET fuel_log TO ROUND(get_stage_fuel_percent(next_stg), 1) + "%". }
-    log_message("Staging initiated - booster fuel at " + fuel_log +
+    tlog("Staging initiated - booster fuel at " + fuel_log +
                 " (DECOUPLEDIN=" + next_stg + ", STAGE:NUMBER=" + STAGE:NUMBER + ")").
 
     // Signal each booster to decouple, then clear the list so subsequent staging
@@ -159,7 +159,7 @@ FUNCTION perform_staging {
             PROCESSOR(tag):CONNECTION:SENDMESSAGE("DECOUPLE").
         }
         SET BOOSTER_COUNT TO BOOSTER_COUNT + BOOSTER_PROCS:LENGTH.
-        log_message("DECOUPLE sent to " + BOOSTER_PROCS:LENGTH + " booster(s)").
+        tlog("DECOUPLE sent to " + BOOSTER_PROCS:LENGTH + " booster(s)").
         BOOSTER_PROCS:CLEAR().
         WAIT 0.3.  // Brief pause to let boosters cut throttle before decoupler fires
     }
@@ -168,7 +168,7 @@ FUNCTION perform_staging {
     STAGE.
     WAIT 1.0.
 
-    log_message("Stage fired. Total boosters separated: " + BOOSTER_COUNT).
+    tlog("Stage fired. Total boosters separated: " + BOOSTER_COUNT).
 }
 
 // =========================================================================
@@ -176,27 +176,27 @@ FUNCTION perform_staging {
 // =========================================================================
 
 FUNCTION phase_vertical_ascent {
-    log_message("PHASE 1: Vertical Ascent").
+    tlog("PHASE 1: Vertical Ascent").
 
     LOCK STEERING TO HEADING(90, 90).  // East, vertical
     LOCK THROTTLE TO 1.0.
 
     WAIT UNTIL SHIP:ALTITUDE > TURN_START_ALTITUDE.
 
-    log_message("Reached turn start altitude").
+    tlog("Reached turn start altitude").
 }
 
 FUNCTION phase_gravity_turn {
-    log_message("PHASE 2: Gravity Turn").
+    tlog("PHASE 2: Gravity Turn").
 
     // Log initial staging state so we can see what parts were found
     LOCAL init_stg IS get_next_booster_stage().
-    log_message("Staging group scan: DECOUPLEDIN=" + init_stg +
+    tlog("Staging group scan: DECOUPLEDIN=" + init_stg +
                 "  STAGE:NUMBER=" + STAGE:NUMBER).
     FOR part IN SHIP:PARTS {
         FOR res IN part:RESOURCES {
             IF res:NAME = "LiquidFuel" AND res:CAPACITY > 0 {
-                log_message("  Part=" + part:NAME +
+                tlog("  Part=" + part:NAME +
                             "  DECOUPLEDIN=" + part:DECOUPLEDIN +
                             "  LF=" + ROUND(res:AMOUNT,0) + "/" + ROUND(res:CAPACITY,0)).
             }
@@ -240,17 +240,20 @@ FUNCTION phase_gravity_turn {
         }
 
         // Display telemetry
-        PRINT "Phase:    GRAVITY TURN                    " AT(0, 9).
-        PRINT "Altitude: " + ROUND(SHIP:ALTITUDE/1000, 1) + " km          " AT(0, 10).
-        PRINT "Apoapsis: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km          " AT(0, 11).
-        PRINT "Pitch:    " + ROUND(target_pitch, 1) + "°          " AT(0, 12).
-        PRINT "Throttle: " + ROUND(throttle_val * 100, 0) + "%          " AT(0, 13).
-        PRINT "Booster:  " + ROUND(b_pct, 1) + "% (DCPL=" + b_stg + " STG=" + STAGE:NUMBER + ")          " AT(0, 14).
-        PRINT "          " + ROUND(b_fuel,0) + "/" + ROUND(b_cap,0) + " LF          " AT(0, 15).
+        show_launch_hud(
+            "GRAVITY TURN",
+            ROUND(SHIP:ALTITUDE/1000, 1),
+            ROUND(SHIP:APOAPSIS/1000, 1),
+            ROUND(target_pitch, 1),
+            ROUND(throttle_val * 100, 0),
+            ROUND(b_pct, 1),
+            b_stg,
+            STAGE:NUMBER
+        ).
 
         // Log fuel state every 5 seconds
         IF (TIME:SECONDS - last_log_time) >= 5 {
-            log_message("Fuel: booster=" + ROUND(b_pct,1) + "% (" +
+            tlog("Fuel: booster=" + ROUND(b_pct,1) + "% (" +
                         ROUND(b_fuel,0) + "/" + ROUND(b_cap,0) + " LF)" +
                         "  DCPL=" + b_stg + "  STG=" + STAGE:NUMBER +
                         "  AP=" + ROUND(SHIP:APOAPSIS/1000,1) + "km").
@@ -260,11 +263,11 @@ FUNCTION phase_gravity_turn {
         WAIT 0.1.
     }
 
-    log_message("Apoapsis reached: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km").
+    tlog("Apoapsis reached: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km").
 }
 
 FUNCTION phase_coast_to_apoapsis {
-    log_message("PHASE 3: Coast to Apoapsis").
+    tlog("PHASE 3: Coast to Apoapsis").
 
     LOCK THROTTLE TO 0.
 
@@ -280,11 +283,11 @@ FUNCTION phase_coast_to_apoapsis {
         WAIT 1.0.
     }
 
-    log_message("Exited atmosphere").
+    tlog("Exited atmosphere").
 }
 
 FUNCTION phase_circularization {
-    log_message("PHASE 4: Circularization").
+    tlog("PHASE 4: Circularization").
 
     // Create maneuver node
     LOCAL circ_node IS create_circularization_node(TARGET_PERIAPSIS).
@@ -294,13 +297,13 @@ FUNCTION phase_circularization {
 
     // Verify orbit
     IF is_orbit_circular(5000) {
-        log_message("Orbit circularized successfully!").
-        log_message("AP: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km, PE: " +
+        tlog("Orbit circularized successfully!").
+        tlog("AP: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km, PE: " +
                    ROUND(SHIP:PERIAPSIS/1000, 1) + " km").
     }
     ELSE {
-        log_message("WARNING: Orbit not fully circular").
-        log_message("AP: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km, PE: " +
+        tlog("WARNING: Orbit not fully circular").
+        tlog("AP: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km, PE: " +
                    ROUND(SHIP:PERIAPSIS/1000, 1) + " km").
     }
 }
@@ -312,7 +315,7 @@ FUNCTION phase_circularization {
 FUNCTION main {
     SET LOG_FILE TO "0:/flight.log".
     CLEARSCREEN.
-    log_message("launch.ks started. Run test.ks separately for pre-flight checks.").
+    tlog("launch.ks started. Run test.ks separately for pre-flight checks.").
 
     // Initialize mission (booster setup, parameter validation)
     IF NOT initialize_mission() {
@@ -323,11 +326,11 @@ FUNCTION main {
     // Wait for launch command (or auto-launch after countdown)
     PRINT "T-10 seconds...".
     FROM {LOCAL t IS 10.} UNTIL t = 0 STEP {SET t TO t - 1.} DO {
-        PRINT "T-" + t + "     " AT(0, 20).
+        PRINT "T-" + t + " seconds...          " AT(0, 9).
         WAIT 1.
     }
 
-    log_message("LIFTOFF!").
+    tlog("LIFTOFF!").
 
     // Execute launch sequence
     phase_vertical_ascent().
@@ -354,7 +357,7 @@ FUNCTION main {
         PRINT "Check booster telemetry for landing status.".
     }
 
-    log_message("Mission complete.").
+    tlog("Mission complete.").
 }
 
 // =========================================================================

@@ -34,6 +34,7 @@ plog("Test 0: Compile validation...").
 LOCAL files_to_check IS LIST(
     "0:/config.ks",
     "0:/lib/util.ks",
+    "0:/lib/telemetry.ks",
     "0:/lib/guidance.ks",
     "0:/lib/ascent.ks",
     "0:/lib/circularize.ks",

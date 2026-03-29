@@ -85,24 +85,24 @@ FUNCTION execute_node {
     LOCAL dv_vec IS node_to_execute:DELTAV.
     LOCAL dv_mag IS dv_vec:MAG.
 
-    log_message("Circularization burn dV: " + ROUND(dv_mag, 1) + " m/s").
+    tlog("Circularization burn dV: " + ROUND(dv_mag, 1) + " m/s").
 
     // Calculate burn time
     LOCAL burn_time IS calculate_burn_time(dv_mag).
-    log_message("Burn time: " + ROUND(burn_time, 1) + " seconds").
+    tlog("Burn time: " + ROUND(burn_time, 1) + " seconds").
 
     // Warp to burn start
     LOCAL burn_start_time IS TIME:SECONDS + node_to_execute:ETA - burn_time/2.
     IF burn_start_time > TIME:SECONDS + lead_time {
-        log_message("Warping to burn point...").
+        tlog("Warping to burn point...").
         WARPTO(burn_start_time - lead_time).
         WAIT UNTIL TIME:SECONDS >= burn_start_time - lead_time.
         WAIT 1.  // Let physics settle
     }
 
     // Orient to node direction
-    log_message("Orienting to burn direction...").
-    log_message("Burn window: T+" + ROUND(burn_start_time - TIME:SECONDS, 1) + "s").
+    tlog("Orienting to burn direction...").
+    tlog("Burn window: T+" + ROUND(burn_start_time - TIME:SECONDS, 1) + "s").
     LOCK STEERING TO node_to_execute:DELTAV.
 
     // Wait for alignment — guard against near-zero deltav vector (causes VANG crash)
@@ -113,13 +113,13 @@ FUNCTION execute_node {
                (TIME:SECONDS - wait_start) > max_wait.
 
     LOCAL align_err IS VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV).
-    log_message("Aligned (" + ROUND(align_err, 1) + " deg). Waiting for burn window...").
+    tlog("Aligned (" + ROUND(align_err, 1) + " deg). Waiting for burn window...").
 
     // Wait for burn time
     WAIT UNTIL TIME:SECONDS >= burn_start_time.
 
     // Execute burn
-    log_message("Executing burn...").
+    tlog("Executing burn...").
     LOCAL remaining_dv IS node_to_execute:DELTAV:MAG.
 
     LOCK STEERING TO node_to_execute:DELTAV.
@@ -127,7 +127,7 @@ FUNCTION execute_node {
     UNTIL remaining_dv < 0.5 {
         // Stage if engines flamed out (e.g. booster separation mid-burn)
         IF SHIP:MAXTHRUST = 0 {
-            log_message("Engines out mid-burn — staging...").
+            tlog("Engines out mid-burn — staging...").
             STAGE.
             WAIT 1.
             // Re-lock steering after staging clears the decoupler
@@ -158,8 +158,8 @@ FUNCTION execute_node {
     // Remove node
     REMOVE node_to_execute.
 
-    log_message("Circularization complete.").
-    log_message("Final orbit: AP=" + ROUND(SHIP:APOAPSIS/1000, 1) + "km, PE=" +
+    tlog("Circularization complete.").
+    tlog("Final orbit: AP=" + ROUND(SHIP:APOAPSIS/1000, 1) + "km, PE=" +
                ROUND(SHIP:PERIAPSIS/1000, 1) + "km").
 }
 

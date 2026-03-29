@@ -2,7 +2,7 @@
 // UTILITY LIBRARY (util.ks)
 // =========================================================================
 // Shared utility functions for launch and landing scripts
-// Provides: math utilities, LATLNG operations, telemetry, logging
+// Provides: math utilities, LATLNG operations, atmospheric model, ship info
 // =========================================================================
 
 @LAZYGLOBAL OFF.
@@ -224,50 +224,6 @@ FUNCTION format_time {
 
     RETURN mins:TOSTRING:PADLEFT(2):REPLACE(" ", "0") + ":" +
            secs:TOSTRING:PADLEFT(2):REPLACE(" ", "0").
-}
-
-// =========================================================================
-// LOGGING
-// =========================================================================
-
-// Print to screen AND write to LOG_FILE — use in test scripts and status output
-FUNCTION plog {
-    PARAMETER message.
-    PRINT message.
-    LOG message TO LOG_FILE.
-}
-
-// Mission phase log: always prints to screen with timestamp, always writes to file
-FUNCTION log_message {
-    PARAMETER message.
-    LOCAL log_entry IS "[" + format_time(MISSIONTIME) + "] " + message.
-    PRINT log_entry.
-    // Only write to archive if connected; local volume writes always attempted
-    IF LOG_FILE:STARTSWITH("0:/") {
-        IF HOMECONNECTION:ISCONNECTED {
-            LOG log_entry TO LOG_FILE.
-        }
-    } ELSE {
-        LOG log_entry TO LOG_FILE.
-    }
-}
-
-// Debug log: only prints/logs when DEBUG_MODE is TRUE
-FUNCTION debug {
-    PARAMETER message.
-    IF DEBUG_MODE {
-        LOCAL entry IS "[DBG " + format_time(MISSIONTIME) + "] " + message.
-        PRINT entry.
-        LOG entry TO LOG_FILE.
-    }
-}
-
-// Enable or disable debug mode at runtime
-FUNCTION set_debug {
-    PARAMETER enabled.
-    SET DEBUG_MODE TO enabled.
-    IF enabled { plog("[DEBUG MODE ON]"). }
-    ELSE { plog("[DEBUG MODE OFF]"). }
 }
 
 // =========================================================================

@@ -113,7 +113,7 @@ FUNCTION get_landing_steering {
 FUNCTION execute_suicide_burn {
     PARAMETER target_latlng, safety_margin IS 1.20.
 
-    log_message("Starting suicide burn...").
+    tlog("Starting suicide burn...").
 
     LOCAL gear_deployed IS FALSE.
     LOCAL final_approach IS FALSE.
@@ -128,7 +128,7 @@ FUNCTION execute_suicide_burn {
         IF altitude_m < 100 AND NOT gear_deployed {
             deploy_gear().
             SET gear_deployed TO TRUE.
-            log_message("Landing gear deployed").
+            tlog("Landing gear deployed").
         }
 
         // Retract airbrakes during landing burn
@@ -139,7 +139,7 @@ FUNCTION execute_suicide_burn {
         // Switch to final approach mode below 50m
         IF altitude_m < 50 AND NOT final_approach {
             SET final_approach TO TRUE.
-            log_message("Final approach - transitioning to vertical").
+            tlog("Final approach - transitioning to vertical").
         }
 
         // Calculate steering
@@ -172,14 +172,14 @@ FUNCTION execute_suicide_burn {
     }
 
     LOCK THROTTLE TO 0.
-    log_message("TOUCHDOWN!").
+    tlog("TOUCHDOWN!").
 
     // Post-landing status
     LOCAL touchdown_speed IS SHIP:VELOCITY:SURFACE:MAG.
-    log_message("Touchdown speed: " + ROUND(touchdown_speed, 2) + " m/s").
+    tlog("Touchdown speed: " + ROUND(touchdown_speed, 2) + " m/s").
 
     LOCAL landing_error IS great_circle_distance(SHIP:GEOPOSITION, target_latlng).
-    log_message("Landing error: " + ROUND(landing_error, 1) + " m").
+    tlog("Landing error: " + ROUND(landing_error, 1) + " m").
 }
 
 // =========================================================================
@@ -190,12 +190,12 @@ FUNCTION execute_suicide_burn {
 FUNCTION execute_landing {
     PARAMETER target_latlng, safety_margin IS 1.20.
 
-    log_message("Initiating landing sequence...").
-    log_message("Target: LAT=" + ROUND(target_latlng:LAT, 4) +
+    tlog("Initiating landing sequence...").
+    tlog("Target: LAT=" + ROUND(target_latlng:LAT, 4) +
                " LON=" + ROUND(target_latlng:LNG, 4)).
 
     // Wait for suicide burn altitude
-    log_message("Waiting for suicide burn altitude...").
+    tlog("Waiting for suicide burn altitude...").
 
     UNTIL should_start_suicide_burn(safety_margin) {
         LOCAL altitude_m IS get_true_altitude().

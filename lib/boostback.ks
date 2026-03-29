@@ -17,7 +17,7 @@ RUNONCEPATH("0:/lib/guidance.ks").
 FUNCTION execute_flip {
     PARAMETER max_flip_time IS 10.
 
-    log_message("Executing flip maneuver...").
+    tlog("Executing flip maneuver...").
 
     // Enable RCS for flip
     RCS ON.
@@ -35,11 +35,11 @@ FUNCTION execute_flip {
     LOCAL flip_time IS TIME:SECONDS - flip_start.
 
     IF VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR) < 5 {
-        log_message("Flip complete in " + ROUND(flip_time, 1) + " seconds").
+        tlog("Flip complete in " + ROUND(flip_time, 1) + " seconds").
         RETURN TRUE.
     }
     ELSE {
-        log_message("WARNING: Flip timeout. Angle error: " +
+        tlog("WARNING: Flip timeout. Angle error: " +
                    ROUND(VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR), 1) + " degrees").
         RETURN FALSE.
     }
@@ -55,8 +55,8 @@ FUNCTION execute_flip {
 FUNCTION execute_boostback {
     PARAMETER target_latlng, max_burn_time IS 60, target_error IS 500.
 
-    log_message("Starting boostback burn...").
-    log_message("Target: LAT=" + ROUND(target_latlng:LAT, 4) + " LON=" + ROUND(target_latlng:LNG, 4)).
+    tlog("Starting boostback burn...").
+    tlog("Target: LAT=" + ROUND(target_latlng:LAT, 4) + " LON=" + ROUND(target_latlng:LNG, 4)).
 
     LOCAL start_time IS TIME:SECONDS.
 
@@ -66,7 +66,7 @@ FUNCTION execute_boostback {
         IF res:NAME = "LiquidFuel" { SET initial_fuel TO initial_fuel + res:AMOUNT. }
     }
     LOCAL landing_reserve IS initial_fuel * 0.30.
-    log_message("Fuel: " + ROUND(initial_fuel, 0) + " LF  landing reserve: " + ROUND(landing_reserve, 0) + " LF").
+    tlog("Fuel: " + ROUND(initial_fuel, 0) + " LF  landing reserve: " + ROUND(landing_reserve, 0) + " LF").
 
     LOCK STEERING TO RETROGRADE.
 
@@ -78,14 +78,14 @@ FUNCTION execute_boostback {
         }
         IF current_fuel <= landing_reserve {
             LOCK THROTTLE TO 0.
-            log_message("Boostback stopped - fuel reserve reached (" + ROUND(current_fuel, 0) + " LF remaining)").
+            tlog("Boostback stopped - fuel reserve reached (" + ROUND(current_fuel, 0) + " LF remaining)").
             RETURN FALSE.
         }
 
         // Stop when velocity is mostly cancelled — further burning is counterproductive
         IF SHIP:VELOCITY:SURFACE:MAG < 300 {
             LOCK THROTTLE TO 0.
-            log_message("Boostback stopped - velocity cancelled (" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s remaining)").
+            tlog("Boostback stopped - velocity cancelled (" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s remaining)").
             RETURN FALSE.
         }
 
@@ -98,7 +98,7 @@ FUNCTION execute_boostback {
 
         IF error_distance < target_error {
             LOCK THROTTLE TO 0.
-            log_message("Boostback complete. Error: " + ROUND(error_distance, 0) + "m").
+            tlog("Boostback complete. Error: " + ROUND(error_distance, 0) + "m").
             RETURN TRUE.
         }
 
@@ -120,11 +120,11 @@ FUNCTION execute_boostback {
     }
 
     LOCK THROTTLE TO 0.
-    log_message("Boostback timeout.").
+    tlog("Boostback timeout.").
 
     LOCAL final_prediction IS predict_current_impact(400, 1.0).
     LOCAL final_error IS great_circle_distance(final_prediction, target_latlng).
-    log_message("Final error: " + ROUND(final_error/1000, 1) + "km").
+    tlog("Final error: " + ROUND(final_error/1000, 1) + "km").
 
     RETURN FALSE.
 }
@@ -141,14 +141,14 @@ FUNCTION assess_boostback_needed {
     LOCAL predicted_impact IS predict_current_impact(400, 1.0).
     LOCAL distance IS great_circle_distance(predicted_impact, target_latlng).
 
-    log_message("Predicted impact distance: " + ROUND(distance, 0) + "m").
+    tlog("Predicted impact distance: " + ROUND(distance, 0) + "m").
 
     IF distance > threshold_distance {
-        log_message("Boostback required.").
+        tlog("Boostback required.").
         RETURN TRUE.
     }
     ELSE {
-        log_message("On target - boostback not needed.").
+        tlog("On target - boostback not needed.").
         RETURN FALSE.
     }
 }
@@ -183,7 +183,7 @@ FUNCTION check_boostback_fuel {
         RETURN TRUE.
     }
 
-    log_message("WARNING: Low fuel for boostback. Have " + ROUND(current_dv, 0) +
+    tlog("WARNING: Low fuel for boostback. Have " + ROUND(current_dv, 0) +
                " m/s, need ~" + ROUND(required_dv, 0) + " m/s").
 
     RETURN FALSE.

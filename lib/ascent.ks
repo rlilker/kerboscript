@@ -149,6 +149,19 @@ FUNCTION get_stage_fuel_percent {
     RETURN 0.
 }
 
+// Get the highest DECOUPLEDIN value among all booster-tagged kOS processors.
+// The kOS processor often sits on a structural adapter one stage above the fuel tanks,
+// so this gives the upper bound when scanning the full booster assembly for fuel.
+FUNCTION get_max_booster_decoupledin {
+    LOCAL max_dcpl IS 0.
+    FOR part IN SHIP:PARTS {
+        IF part:HASMODULE("kOSProcessor") AND part:TAG:STARTSWITH("booster") {
+            IF part:DECOUPLEDIN > max_dcpl { SET max_dcpl TO part:DECOUPLEDIN. }
+        }
+    }
+    RETURN max_dcpl.
+}
+
 // Get the DECOUPLEDIN values of staging groups that contain a booster kOS processor.
 // Only these groups get threshold-based early staging; others use flameout-only.
 FUNCTION get_booster_decoupledin_values {
@@ -169,15 +182,19 @@ FUNCTION get_booster_decoupledin_values {
 FUNCTION get_next_booster_stage {
     LOCAL booster_dcpl IS get_booster_decoupledin_values().
 
+    // The kOS processor may be on a structural adapter (e.g. DCPL=6) while the actual
+    // fuel tanks burning in the booster are one stage lower (e.g. DCPL=5). Scan the
+    // entire booster assembly: all DECOUPLEDIN from 1 up to the processor's DECOUPLEDIN.
+    LOCAL max_booster_dcpl IS get_max_booster_decoupledin().
+
     // Build a map of DECOUPLEDIN -> [fuel, capacity]
     LOCAL groups IS LEXICON().
 
     FOR part IN SHIP:PARTS {
         LOCAL dcpl IS part:DECOUPLEDIN.
-        // Only track groups that are booster groups (or any >1 if no boosters defined)
         LOCAL include IS FALSE.
         IF booster_dcpl:LENGTH > 0 {
-            SET include TO booster_dcpl:CONTAINS(dcpl).
+            SET include TO dcpl > 0 AND dcpl <= max_booster_dcpl.
         } ELSE {
             SET include TO dcpl > 1.
         }
@@ -222,22 +239,22 @@ FUNCTION get_next_booster_stage {
 
 // Print staging diagnostic info (call with DEBUG_MODE = TRUE to see output)
 FUNCTION debug_staging {
-    debug("--- Staging Diagnostic ---").
-    debug("STAGE:NUMBER = " + STAGE:NUMBER).
+    tdebug("--- Staging Diagnostic ---").
+    tdebug("STAGE:NUMBER = " + STAGE:NUMBER).
     FOR part IN SHIP:PARTS {
         FOR res IN part:RESOURCES {
             IF res:NAME = "LiquidFuel" AND res:CAPACITY > 0 {
-                debug("  " + part:NAME + "  DECOUPLEDIN=" + part:DECOUPLEDIN +
+                tdebug("  " + part:NAME + "  DECOUPLEDIN=" + part:DECOUPLEDIN +
                       "  LF=" + ROUND(res:AMOUNT,0) + "/" + ROUND(res:CAPACITY,0)).
             }
         }
     }
     LOCAL next_stg IS get_next_booster_stage().
-    debug("Next booster stage group: DECOUPLEDIN=" + next_stg).
+    tdebug("Next booster stage group: DECOUPLEDIN=" + next_stg).
     IF next_stg >= 0 {
-        debug("  Fuel in that group: " + ROUND(get_stage_fuel_percent(next_stg), 1) + "%").
+        tdebug("  Fuel in that group: " + ROUND(get_stage_fuel_percent(next_stg), 1) + "%").
     }
-    debug("--------------------------").
+    tdebug("--------------------------").
 }
 
 // Check if staging is needed.
@@ -253,10 +270,11 @@ FUNCTION check_staging_needed {
         LOCAL fuel_max IS get_stage_fuel_capacity(next_stg).
         IF fuel_max > 0 {
             LOCAL fuel_pct IS (get_stage_fuel(next_stg) / fuel_max) * 100.
-            // Only apply threshold staging if this is a booster group
-            LOCAL is_booster_group IS booster_dcpl:LENGTH = 0 OR booster_dcpl:CONTAINS(next_stg).
+            // Apply threshold staging for any group within the booster assembly
+            LOCAL max_b_dcpl IS get_max_booster_decoupledin().
+            LOCAL is_booster_group IS booster_dcpl:LENGTH = 0 OR (next_stg > 0 AND next_stg <= max_b_dcpl).
             IF is_booster_group {
-                debug("Booster fuel (DECOUPLEDIN=" + next_stg + "): " +
+                tdebug("Booster fuel (DECOUPLEDIN=" + next_stg + "): " +
                       ROUND(fuel_pct, 1) + "% / threshold " + fuel_threshold + "%").
                 RETURN fuel_pct < fuel_threshold.
             }
@@ -268,7 +286,7 @@ FUNCTION check_staging_needed {
     LIST ENGINES IN engines_collection.
     FOR eng IN engines_collection {
         IF eng:IGNITION AND eng:FLAMEOUT AND eng:POSSIBLETHRUST > 10 {
-            debug("Flameout trigger: " + eng:NAME +
+            tdebug("Flameout trigger: " + eng:NAME +
                   " (" + ROUND(eng:POSSIBLETHRUST, 0) + " kN)").
             RETURN TRUE.
         }
