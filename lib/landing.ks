@@ -97,7 +97,7 @@ FUNCTION get_landing_steering {
     IF distance_to_target > 50 AND altitude_m > 100 {
         // Still have time to correct
         LOCAL retro_corrected IS steer_retrograde_with_correction(target_latlng, 0.5).
-        RETURN blend_steering(retro_corrected, SHIP:UP, blend_factor).
+        RETURN blend_steering(retro_corrected, SHIP:UP:VECTOR, blend_factor).
     }
     ELSE {
         // Close to target or very low - just blend retrograde and vertical
