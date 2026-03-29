@@ -215,20 +215,35 @@ FUNCTION execute_suicide_burn {
         // Fine control near ground / touchdown
         IF altitude_m < (SUICIDE_ALT_TARGET + 5) {
             // Below target altitude or very close: transition to soft touchdown
-            IF speed < 10 {
+            IF speed < 15 {
                 // Aim for TOUCHDOWN_SPEED vertical descent
                 LOCAL target_v IS -TOUCHDOWN_SPEED.
                 LOCAL v_error IS target_v - v_up. // e.g. -1.5 - (-10) = +8.5 (falling too fast, need more thrust)
-                
+
                 // Simple proportional control for hover/touchdown (Kp=1.5)
-                LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, SHIP:MAXTHRUST).
+                LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, ship_max_thrust * cos_theta).
                 SET throttle_val TO clamp(hover_throttle, 0.05, 0.8).
+            }
+        }
+
+        // Active horizontal speed cancellation using RCS translation (below 50m)
+        IF altitude_m < 50 {
+            LOCAL horizontal_vel IS SHIP:VELOCITY:SURFACE - VDOT(SHIP:VELOCITY:SURFACE, SHIP:UP:VECTOR) * SHIP:UP:VECTOR.
+            IF horizontal_vel:MAG > 0.1 {
+                LOCAL local_hvel IS SHIP:FACING:INVERSE * horizontal_vel.
+                // Translate in opposite direction of horizontal velocity to "scrub" it off
+                SET SHIP:CONTROL:STARBOARD TO clamp(-local_hvel:X * 1.5, -1, 1).
+                SET SHIP:CONTROL:TOP TO clamp(-local_hvel:Y * 1.5, -1, 1).
+            } ELSE {
+                SET SHIP:CONTROL:STARBOARD TO 0.
+                SET SHIP:CONTROL:TOP TO 0.
             }
         }
 
         // Kill throttle at very low altitude if nearly stopped
         IF altitude_m < 0.2 OR (altitude_m < 2 AND speed < 0.3) {
             SET throttle_val TO 0.
+            SET SHIP:CONTROL:NEUTRALIZE TO TRUE.
         }
 
         LOCK THROTTLE TO throttle_val.

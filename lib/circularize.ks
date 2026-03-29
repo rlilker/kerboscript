@@ -157,6 +157,8 @@ FUNCTION execute_node {
 
     // Cut throttle
     LOCK THROTTLE TO 0.
+    UNLOCK STEERING.
+    UNLOCK THROTTLE.
     WAIT 0.5.
 
     // Remove node

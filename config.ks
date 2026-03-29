@@ -37,7 +37,8 @@ GLOBAL TARGET_INCLINATION IS 0.       // Orbital inclination (degrees, 0 = equat
 
 GLOBAL TURN_START_ALTITUDE IS 1500.   // Begin gravity turn (m)
 GLOBAL TURN_END_ALTITUDE IS 50000.    // Complete turn (m)
-GLOBAL TURN_SHAPE IS 1.5.             // Turn profile shape (Kerbin: 1.5–2.0)
+GLOBAL TURN_SHAPE IS 2.0.             // Turn profile shape (Kerbin: 1.5–2.0)
+                                      // 2.0 is steeper, better for Ike I high-TWR core.
 GLOBAL MAX_Q IS 25000.                // Max dynamic pressure (Pa) — throttle back if exceeded
 
 // =========================================================================
