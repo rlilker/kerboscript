@@ -25,8 +25,12 @@ FUNCTION execute_flip {
     LOCAL flip_start IS TIME:SECONDS.
     LOCK STEERING TO RETROGRADE.
 
-    WAIT UNTIL VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR) < 5 OR
-               (TIME:SECONDS - flip_start) > max_flip_time.
+    UNTIL VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR) < 5 OR
+          (TIME:SECONDS - flip_start) > max_flip_time {
+        LOCAL angle_err IS ROUND(VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR), 1).
+        show_booster_hud("FLIP TO RETROGRADE", "Angle error: " + angle_err + " deg").
+        WAIT 0.5.
+    }
 
     LOCAL flip_time IS TIME:SECONDS - flip_start.
 
@@ -45,7 +49,9 @@ FUNCTION execute_flip {
 // BOOSTBACK BURN
 // =========================================================================
 
-// Execute boostback burn to return to target landing zone
+// Execute boostback burn to return to target landing zone.
+// Burns primarily retrograde (to stop the ballistic arc) with a small lean toward target.
+// Full throttle throughout; stops early if fuel reserve for landing is reached.
 FUNCTION execute_boostback {
     PARAMETER target_latlng, max_burn_time IS 60, target_error IS 500.
 
@@ -53,64 +59,72 @@ FUNCTION execute_boostback {
     log_message("Target: LAT=" + ROUND(target_latlng:LAT, 4) + " LON=" + ROUND(target_latlng:LNG, 4)).
 
     LOCAL start_time IS TIME:SECONDS.
-    LOCAL error_integral IS 0.
 
-    // PID tuning parameters
-    LOCAL kp IS 0.5.
-    LOCAL ki IS 0.1.
+    // Record current fuel to calculate landing reserve
+    LOCAL initial_fuel IS 0.
+    FOR res IN SHIP:RESOURCES {
+        IF res:NAME = "LiquidFuel" { SET initial_fuel TO initial_fuel + res:AMOUNT. }
+    }
+    LOCAL landing_reserve IS initial_fuel * 0.30.
+    log_message("Fuel: " + ROUND(initial_fuel, 0) + " LF  landing reserve: " + ROUND(landing_reserve, 0) + " LF").
 
     LOCK STEERING TO RETROGRADE.
 
     UNTIL (TIME:SECONDS - start_time) > max_burn_time {
-        // Predict where we'll land with current trajectory
-        LOCAL predicted_impact IS predict_current_impact(120, 1.0).
-
-        // Calculate error (distance from target)
-        LOCAL error_distance IS great_circle_distance(predicted_impact, target_latlng).
-
-        // Display progress
-        IF MOD(FLOOR(TIME:SECONDS - start_time), 5) = 0 {
-            PRINT "Boostback: " + ROUND(TIME:SECONDS - start_time, 0) + "s, Error: " +
-                  ROUND(error_distance, 0) + "m          " AT(0, 15).
+        // Check fuel reserve — stop if not enough left to land
+        LOCAL current_fuel IS 0.
+        FOR res IN SHIP:RESOURCES {
+            IF res:NAME = "LiquidFuel" { SET current_fuel TO current_fuel + res:AMOUNT. }
+        }
+        IF current_fuel <= landing_reserve {
+            LOCK THROTTLE TO 0.
+            log_message("Boostback stopped - fuel reserve reached (" + ROUND(current_fuel, 0) + " LF remaining)").
+            RETURN FALSE.
         }
 
-        // Stop if within acceptable range
+        // Stop when velocity is mostly cancelled — further burning is counterproductive
+        IF SHIP:VELOCITY:SURFACE:MAG < 300 {
+            LOCK THROTTLE TO 0.
+            log_message("Boostback stopped - velocity cancelled (" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s remaining)").
+            RETURN FALSE.
+        }
+
+        // Predict landing point and check error
+        LOCAL predicted_impact IS predict_current_impact(400, 1.0).
+        LOCAL error_distance IS great_circle_distance(predicted_impact, target_latlng).
+
+        LOCAL bb_info IS "Burn: " + ROUND(TIME:SECONDS - start_time, 0) + "s  Err: " + ROUND(error_distance/1000, 1) + "km".
+        show_booster_hud("BOOSTBACK BURN", bb_info).
+
         IF error_distance < target_error {
             LOCK THROTTLE TO 0.
             log_message("Boostback complete. Error: " + ROUND(error_distance, 0) + "m").
-            log_message("Predicted impact: LAT=" + ROUND(predicted_impact:LAT, 4) +
-                       " LON=" + ROUND(predicted_impact:LNG, 4)).
             RETURN TRUE.
         }
 
-        // Calculate steering direction toward target
-        LOCAL target_bearing IS bearing_to_target(predicted_impact, target_latlng).
-        LOCAL correction_vector IS heading_vector(target_bearing, 0).
-
-        // Blend retrograde and correction based on error magnitude
-        LOCAL blend_factor IS MIN(1.0, error_distance / 5000).
-        LOCAL steer_vec IS ((1 - blend_factor) * RETROGRADE:VECTOR +
-                            blend_factor * correction_vector):NORMALIZED.
-
+        // Steering: retrograde with small lean toward KSC.
+        // Lean is fixed at 20% max — ensures 80% retrograde (velocity cancellation)
+        // and 20% correction (trajectory bend toward KSC).
+        // Use current position bearing (not predicted impact) for stability.
+        LOCAL target_bearing IS bearing_to_target(SHIP:GEOPOSITION, target_latlng).
+        LOCAL correction_vec IS heading_vector(target_bearing, 0).
+        LOCAL lean_factor IS MIN(0.20, error_distance / 200000).
+        LOCAL steer_vec IS ((1 - lean_factor) * RETROGRADE:VECTOR +
+                            lean_factor * correction_vec):NORMALIZED.
         LOCK STEERING TO steer_vec.
 
-        // PI throttle control
-        LOCAL throttle_p IS MIN(1.0, error_distance / 5000) * kp.
-        SET error_integral TO error_integral + error_distance * 0.1.  // dt = 0.1s
-        LOCAL throttle_i IS error_integral * ki.
-        LOCAL throttle_val IS MIN(1.0, MAX(0.1, throttle_p + throttle_i)).
-
-        LOCK THROTTLE TO throttle_val.
+        // Full throttle — maximum delta-V from limited fuel
+        LOCK THROTTLE TO 1.0.
 
         WAIT 0.1.
     }
 
     LOCK THROTTLE TO 0.
-    log_message("Boostback timeout. Landing downrange.").
+    log_message("Boostback timeout.").
 
-    LOCAL final_prediction IS predict_current_impact(120, 1.0).
+    LOCAL final_prediction IS predict_current_impact(400, 1.0).
     LOCAL final_error IS great_circle_distance(final_prediction, target_latlng).
-    log_message("Final error: " + ROUND(final_error, 0) + "m").
+    log_message("Final error: " + ROUND(final_error/1000, 1) + "km").
 
     RETURN FALSE.
 }
@@ -124,7 +138,7 @@ FUNCTION assess_boostback_needed {
     PARAMETER target_latlng, threshold_distance IS 2000.
 
     // Predict impact with no boostback
-    LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+    LOCAL predicted_impact IS predict_current_impact(400, 1.0).
     LOCAL distance IS great_circle_distance(predicted_impact, target_latlng).
 
     log_message("Predicted impact distance: " + ROUND(distance, 0) + "m").
@@ -146,7 +160,7 @@ FUNCTION estimate_boostback_dv {
     // Simple estimate: distance to target / burn efficiency
     // This is a rough approximation
 
-    LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+    LOCAL predicted_impact IS predict_current_impact(400, 1.0).
     LOCAL distance IS great_circle_distance(predicted_impact, target_latlng).
 
     // Estimate efficiency factor (how much horizontal distance per m/s dV)

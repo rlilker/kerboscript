@@ -112,6 +112,10 @@ FUNCTION coast_to_landing_altitude {
         // Update telemetry every second
         IF TIME:SECONDS - last_update > 1.0 {
             manage_descent(40000).
+            LOCAL airbrake_status IS "".
+            IF BRAKES { SET airbrake_status TO "Airbrakes: DEPLOYED". }
+            ELSE { SET airbrake_status TO "Airbrakes: retracted". }
+            show_booster_hud("DESCENT", airbrake_status).
             SET last_update TO TIME:SECONDS.
         }
 

@@ -57,10 +57,9 @@ FUNCTION calculate_suicide_throttle {
     LOCAL altitude_m IS get_true_altitude().
     LOCAL g IS BODY:MU / (BODY:RADIUS + SHIP:ALTITUDE)^2.
 
-    // Avoid division by zero
-    IF altitude_m < 1 {
-        RETURN 0.
-    }
+    // Avoid division by zero — no thrust available or at/below ground
+    IF SHIP:MAXTHRUST <= 0 { RETURN 0. }
+    IF altitude_m < 1 { RETURN 0. }
 
     // Required deceleration to stop at current altitude
     // a = v^2 / (2 * h)
@@ -166,9 +165,8 @@ FUNCTION execute_suicide_burn {
         LOCK THROTTLE TO throttle_val.
 
         // Display telemetry
-        PRINT "Altitude: " + ROUND(altitude_m, 1) + " m          " AT(0, 18).
-        PRINT "Speed: " + ROUND(speed, 1) + " m/s          " AT(0, 19).
-        PRINT "Throttle: " + ROUND(throttle_val * 100, 0) + "%          " AT(0, 20).
+        LOCAL burn_info IS "Alt: " + ROUND(altitude_m, 0) + "m  Thr: " + ROUND(throttle_val*100, 0) + "%".
+        show_booster_hud("SUICIDE BURN", burn_info).
 
         WAIT 0.05.  // High update rate for precision
     }
@@ -207,8 +205,8 @@ FUNCTION execute_landing {
         LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.5).
 
         // Update display
-        PRINT "Altitude: " + ROUND(altitude_m, 0) + " m          " AT(0, 16).
-        PRINT "Burn alt: " + ROUND(burn_alt, 0) + " m          " AT(0, 17).
+        LOCAL wait_info IS "Waiting: alt=" + ROUND(altitude_m,0) + "m  burn@" + ROUND(burn_alt,0) + "m".
+        show_booster_hud("WAITING FOR BURN ALT", wait_info).
 
         WAIT 0.1.
     }

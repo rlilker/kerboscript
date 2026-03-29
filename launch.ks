@@ -7,48 +7,32 @@
 
 @LAZYGLOBAL OFF.
 
-// Load libraries
-RUNONCEPATH("0:/lib/util.ks").
+// Load config (pulls in util.ks + all user-tunable settings)
+RUNONCEPATH("0:/config.ks").
 RUNONCEPATH("0:/lib/ascent.ks").
 RUNONCEPATH("0:/lib/circularize.ks").
-
-// =========================================================================
-// MISSION PARAMETERS (USER CONFIGURABLE)
-// =========================================================================
-
-// Orbital parameters
-SET TARGET_APOAPSIS TO 100000.       // Target apoapsis in meters (100km)
-SET TARGET_PERIAPSIS TO 100000.      // Target periapsis for circularization
-SET TARGET_INCLINATION TO 0.         // Target orbital inclination (0° = equatorial)
-
-// Ascent profile
-SET TURN_START_ALTITUDE TO 100.      // Begin gravity turn at 100m
-SET TURN_END_ALTITUDE TO 45000.      // Complete turn by 45km
-SET TURN_SHAPE TO 0.5.               // Turn shape factor (0.4-0.6, lower = earlier turn)
-SET MAX_Q TO 25000.                  // Max dynamic pressure (Pa), throttle if exceeded
-
-// Staging parameters
-SET STAGE_FUEL_THRESHOLD TO 5.       // Stage when fuel drops below 5%
-SET ENABLE_BOOSTER_RECOVERY TO TRUE. // Enable landing scripts on boosters
-
-// Landing zone (KSC coordinates)
-SET LANDING_ZONE_LAT TO -0.0972.     // KSC latitude
-SET LANDING_ZONE_LON TO -74.5577.    // KSC longitude
 
 // =========================================================================
 // GLOBAL STATE
 // =========================================================================
 
-DECLARE GLOBAL BOOSTER_COUNT.
-IF NOT (DEFINED BOOSTER_COUNT) {
-    SET BOOSTER_COUNT TO 0.
-}
+GLOBAL BOOSTER_COUNT IS 0.
+GLOBAL BOOSTER_PROCS IS LIST().   // processor references for all active boosters
 
 // =========================================================================
 // PRE-LAUNCH INITIALIZATION
 // =========================================================================
 
 FUNCTION initialize_mission {
+    // Wipe all .log files for a clean slate each flight
+    LOCAL old_logs IS LIST().
+    LIST FILES IN old_logs.
+    FOR f IN old_logs {
+        IF f:NAME:ENDSWITH(".log") {
+            DELETEPATH("0:/" + f:NAME).
+        }
+    }
+
     clear_screen().
     print_header("LAUNCH AUTOPILOT").
 
@@ -60,21 +44,33 @@ FUNCTION initialize_mission {
     PRINT "  Booster Recovery: " + ENABLE_BOOSTER_RECOVERY.
     PRINT " ".
 
-    // Verify vessel readiness
-    IF SHIP:MAXTHRUST = 0 {
-        PRINT "ERROR: No active engines!".
+    // Validate apoapsis — must be above the atmosphere
+    LOCAL atm_height IS BODY:ATM:HEIGHT.
+    IF TARGET_APOAPSIS <= atm_height {
+        PRINT "ERROR: TARGET_APOAPSIS " + ROUND(TARGET_APOAPSIS/1000,1) +
+              "km is inside " + BODY:NAME + "'s atmosphere (" +
+              ROUND(atm_height/1000,1) + "km).".
         RETURN FALSE.
     }
 
-    // Prepare booster recovery if enabled
+    // Verify vessel readiness — wait up to 10s for engines to be staged
+    IF SHIP:MAXTHRUST = 0 {
+        PRINT "Engines not active — stage once to activate, then waiting...".
+        LOCAL engine_wait IS TIME:SECONDS + 10.
+        WAIT UNTIL SHIP:MAXTHRUST > 0 OR TIME:SECONDS > engine_wait.
+        IF SHIP:MAXTHRUST = 0 {
+            PRINT "ERROR: No active engines after 10s. Stage and re-run.".
+            RETURN FALSE.
+        }
+    }
+
+    // Load autoland scripts onto booster processors
     IF ENABLE_BOOSTER_RECOVERY {
         IF NOT EXISTS("0:/autoland_staging.ks") {
-            PRINT "WARNING: autoland_staging.ks not found!".
-            PRINT "Booster recovery will not be available.".
+            PRINT "WARNING: autoland_staging.ks not found — recovery disabled.".
             SET ENABLE_BOOSTER_RECOVERY TO FALSE.
-        }
-        ELSE {
-            PRINT "Booster recovery script ready.".
+        } ELSE {
+            setup_booster_processors().
         }
     }
 
@@ -85,72 +81,64 @@ FUNCTION initialize_mission {
 }
 
 // =========================================================================
-// BOOSTER RECOVERY
+// BOOSTER SETUP
 // =========================================================================
 
-FUNCTION trigger_booster_recovery {
-    PARAMETER booster_vessel.
+// Finds all kOS processors whose Name Tag starts with "booster".
+// Boots autoland_staging.ks from archive on each, waits for READY,
+// then populates BOOSTER_PROCS for later DECOUPLE signaling.
+FUNCTION setup_booster_processors {
+    LOCAL booster_parts IS LIST().
 
-    PRINT "Triggering recovery on: " + booster_vessel:NAME.
-
-    // Copy landing script to booster
-    // Note: This requires vessel switching, which may cause brief interruption
-
-    LOCAL original_vessel IS SHIP.
-
-    // Switch to booster
-    SET KUNIVERSE:ACTIVEVESSEL TO booster_vessel.
-    WAIT 0.5.
-
-    // Copy script
-    IF EXISTS("0:/autoland_staging.ks") {
-        COPYPATH("0:/autoland_staging.ks", "1:/boot.ks").
-        WAIT 0.2.
-
-        // Reboot processor to activate landing script
-        LOCAL proc IS CORE:PART:GETMODULE("kOSProcessor").
-        proc:DOEVENT("Toggle Power").
-        WAIT 0.1.
-        proc:DOEVENT("Toggle Power").
-    }
-
-    // Switch back to main vessel
-    WAIT 0.5.
-    SET KUNIVERSE:ACTIVEVESSEL TO original_vessel.
-    WAIT 0.5.
-
-    PRINT "Recovery script activated on " + booster_vessel:NAME.
-}
-
-FUNCTION check_for_staged_boosters {
-    // Check if any new vessels appeared (staged boosters)
-    LOCAL staged_boosters IS LIST().
-
-    LIST TARGETS IN all_vessels.
-    FOR vessel_obj IN all_vessels {
-        // Check if this is a new vessel from our ship
-        IF vessel_obj <> SHIP AND vessel_obj:NAME:STARTSWITH(SHIP:NAME:SPLIT(" ")[0]) {
-            // Check if it has kOS processor and probe core
-            LOCAL has_kos IS FALSE.
-            LOCAL has_probe IS FALSE.
-
-            FOR part IN vessel_obj:PARTS {
-                IF part:HASMODULE("kOSProcessor") {
-                    SET has_kos TO TRUE.
-                }
-                IF part:HASMODULE("ModuleCommand") {
-                    SET has_probe TO TRUE.
-                }
-            }
-
-            IF has_kos AND has_probe {
-                // This is a recoverable booster
-                staged_boosters:ADD(vessel_obj).
-            }
+    FOR part IN SHIP:PARTS {
+        IF part:HASMODULE("kOSProcessor") AND part:TAG:STARTSWITH("booster") {
+            booster_parts:ADD(part).
         }
     }
 
-    RETURN staged_boosters.
+    IF booster_parts:LENGTH = 0 {
+        log_message("No booster processors found (set Name Tag to 'booster_N' in VAB)").
+        RETURN.
+    }
+
+    log_message("Arming " + booster_parts:LENGTH + " booster(s) with autoland_staging.ks...").
+
+    FOR part IN booster_parts {
+        LOCAL proc IS PROCESSOR(part:TAG).
+        LOCAL vol IS proc:VOLUME.
+        COPYPATH("0:/autoland_boot.ks", vol).
+        proc:DEACTIVATE().
+        WAIT 0.1.
+        SET proc:BOOTFILENAME TO "autoland_boot.ks".
+        proc:ACTIVATE().
+        log_message("  " + part:TAG + " booted via stub").
+    }
+
+    // Wait for READY from autoland_staging.ks on each booster
+    LOCAL boosters_ready IS 0.
+    LOCAL ready_deadline IS TIME:SECONDS + 90.
+    UNTIL boosters_ready >= booster_parts:LENGTH OR TIME:SECONDS > ready_deadline {
+        UNTIL CORE:MESSAGES:EMPTY {
+            LOCAL msg IS CORE:MESSAGES:POP.
+            IF msg:CONTENT = "READY" {
+                SET boosters_ready TO boosters_ready + 1.
+                log_message("  READY (" + boosters_ready + "/" + booster_parts:LENGTH + ")").
+            }
+        }
+        PRINT "Boosters armed: " + boosters_ready + "/" + booster_parts:LENGTH + "     " AT(0, 20).
+        WAIT 0.5.
+    }
+    PRINT "                                          " AT(0, 20).
+
+    IF boosters_ready < booster_parts:LENGTH {
+        log_message("WARNING: Only " + boosters_ready + "/" + booster_parts:LENGTH + " boosters ready").
+    } ELSE {
+        log_message("All " + boosters_ready + " booster(s) armed and in standby").
+    }
+
+    FOR part IN booster_parts {
+        BOOSTER_PROCS:ADD(part:TAG).
+    }
 }
 
 // =========================================================================
@@ -158,40 +146,29 @@ FUNCTION check_for_staged_boosters {
 // =========================================================================
 
 FUNCTION perform_staging {
-    log_message("Staging initiated - fuel at " +
-               ROUND(get_stage_fuel_percent(STAGE:NUMBER), 1) + "%").
+    LOCAL next_stg IS get_next_booster_stage().
+    LOCAL fuel_log IS "unknown".
+    IF next_stg >= 0 { SET fuel_log TO ROUND(get_stage_fuel_percent(next_stg), 1) + "%". }
+    log_message("Staging initiated - booster fuel at " + fuel_log +
+                " (DECOUPLEDIN=" + next_stg + ", STAGE:NUMBER=" + STAGE:NUMBER + ")").
 
-    // Note boosters before staging
-    LOCAL boosters_before IS check_for_staged_boosters().
-
-    // Execute staging
-    STAGE.
-    WAIT 1.0.  // Allow physics to settle
-
-    // Check for new boosters
-    LOCAL boosters_after IS check_for_staged_boosters().
-
-    // Find newly separated boosters
-    IF ENABLE_BOOSTER_RECOVERY {
-        FOR booster IN boosters_after {
-            LOCAL is_new IS TRUE.
-            FOR old_booster IN boosters_before {
-                IF booster = old_booster {
-                    SET is_new TO FALSE.
-                    BREAK.
-                }
-            }
-
-            IF is_new {
-                // Increment global booster count
-                SET BOOSTER_COUNT TO BOOSTER_COUNT + 1.
-                log_message("Booster #" + BOOSTER_COUNT + " separated: " + booster:NAME).
-
-                // Trigger recovery
-                trigger_booster_recovery(booster).
-            }
+    // Signal each booster to decouple, then clear the list so subsequent staging
+    // events don't try to re-send to already-separated (out of range) processors.
+    IF ENABLE_BOOSTER_RECOVERY AND BOOSTER_PROCS:LENGTH > 0 {
+        FOR tag IN BOOSTER_PROCS {
+            PROCESSOR(tag):CONNECTION:SENDMESSAGE("DECOUPLE").
         }
+        SET BOOSTER_COUNT TO BOOSTER_COUNT + BOOSTER_PROCS:LENGTH.
+        log_message("DECOUPLE sent to " + BOOSTER_PROCS:LENGTH + " booster(s)").
+        BOOSTER_PROCS:CLEAR().
+        WAIT 0.3.  // Brief pause to let boosters cut throttle before decoupler fires
     }
+
+    // Fire the decoupler
+    STAGE.
+    WAIT 1.0.
+
+    log_message("Stage fired. Total boosters separated: " + BOOSTER_COUNT).
 }
 
 // =========================================================================
@@ -212,10 +189,25 @@ FUNCTION phase_vertical_ascent {
 FUNCTION phase_gravity_turn {
     log_message("PHASE 2: Gravity Turn").
 
+    // Log initial staging state so we can see what parts were found
+    LOCAL init_stg IS get_next_booster_stage().
+    log_message("Staging group scan: DECOUPLEDIN=" + init_stg +
+                "  STAGE:NUMBER=" + STAGE:NUMBER).
+    FOR part IN SHIP:PARTS {
+        FOR res IN part:RESOURCES {
+            IF res:NAME = "LiquidFuel" AND res:CAPACITY > 0 {
+                log_message("  Part=" + part:NAME +
+                            "  DECOUPLEDIN=" + part:DECOUPLEDIN +
+                            "  LF=" + ROUND(res:AMOUNT,0) + "/" + ROUND(res:CAPACITY,0)).
+            }
+        }
+    }
+
     // Calculate launch azimuth
     LOCAL launch_heading IS get_launch_azimuth(TARGET_INCLINATION).
+    LOCAL last_log_time IS TIME:SECONDS.
 
-    UNTIL SHIP:APOAPSIS >= TARGET_APOAPSIS OR SHIP:ALTITUDE > TURN_END_ALTITUDE {
+    UNTIL SHIP:APOAPSIS >= TARGET_APOAPSIS OR SHIP:ALTITUDE > BODY:ATM:HEIGHT {
         // Calculate target pitch
         LOCAL target_pitch IS get_target_pitch(
             SHIP:ALTITUDE,
@@ -231,16 +223,39 @@ FUNCTION phase_gravity_turn {
         LOCAL throttle_val IS get_ascent_throttle(TARGET_APOAPSIS, MAX_Q).
         LOCK THROTTLE TO throttle_val.
 
+        // Get current booster fuel state
+        LOCAL b_stg IS get_next_booster_stage().
+        LOCAL b_fuel IS 0.
+        LOCAL b_cap IS 0.
+        IF b_stg >= 0 {
+            SET b_fuel TO get_stage_fuel(b_stg).
+            SET b_cap TO get_stage_fuel_capacity(b_stg).
+        }
+        LOCAL b_pct IS 0.
+        IF b_cap > 0 { SET b_pct TO (b_fuel / b_cap) * 100. }
+
         // Check staging
         IF check_staging_needed(STAGE_FUEL_THRESHOLD) {
             perform_staging().
         }
 
         // Display telemetry
+        PRINT "Phase:    GRAVITY TURN                    " AT(0, 9).
         PRINT "Altitude: " + ROUND(SHIP:ALTITUDE/1000, 1) + " km          " AT(0, 10).
         PRINT "Apoapsis: " + ROUND(SHIP:APOAPSIS/1000, 1) + " km          " AT(0, 11).
-        PRINT "Pitch: " + ROUND(target_pitch, 1) + "°          " AT(0, 12).
+        PRINT "Pitch:    " + ROUND(target_pitch, 1) + "°          " AT(0, 12).
         PRINT "Throttle: " + ROUND(throttle_val * 100, 0) + "%          " AT(0, 13).
+        PRINT "Booster:  " + ROUND(b_pct, 1) + "% (DCPL=" + b_stg + " STG=" + STAGE:NUMBER + ")          " AT(0, 14).
+        PRINT "          " + ROUND(b_fuel,0) + "/" + ROUND(b_cap,0) + " LF          " AT(0, 15).
+
+        // Log fuel state every 5 seconds
+        IF (TIME:SECONDS - last_log_time) >= 5 {
+            log_message("Fuel: booster=" + ROUND(b_pct,1) + "% (" +
+                        ROUND(b_fuel,0) + "/" + ROUND(b_cap,0) + " LF)" +
+                        "  DCPL=" + b_stg + "  STG=" + STAGE:NUMBER +
+                        "  AP=" + ROUND(SHIP:APOAPSIS/1000,1) + "km").
+            SET last_log_time TO TIME:SECONDS.
+        }
 
         WAIT 0.1.
     }
@@ -256,8 +271,8 @@ FUNCTION phase_coast_to_apoapsis {
     // Follow prograde during coast
     LOCK STEERING TO PROGRADE.
 
-    // Continue staging if needed
-    UNTIL SHIP:ALTITUDE > BODY:ATM:HEIGHT {
+    // Stage any remaining boosters before circularization — even if already above atmosphere
+    UNTIL SHIP:ALTITUDE > BODY:ATM:HEIGHT OR get_next_booster_stage() < 0 {
         IF check_staging_needed(STAGE_FUEL_THRESHOLD) {
             perform_staging().
         }
@@ -295,7 +310,11 @@ FUNCTION phase_circularization {
 // =========================================================================
 
 FUNCTION main {
-    // Initialize mission
+    SET LOG_FILE TO "0:/flight.log".
+    CLEARSCREEN.
+    log_message("launch.ks started. Run test.ks separately for pre-flight checks.").
+
+    // Initialize mission (booster setup, parameter validation)
     IF NOT initialize_mission() {
         PRINT "Mission initialization failed!".
         RETURN.

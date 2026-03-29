@@ -8,6 +8,16 @@
 @LAZYGLOBAL OFF.
 
 // =========================================================================
+// DEBUG / LOGGING GLOBALS
+// =========================================================================
+
+// Set DEBUG_MODE to TRUE for verbose console output during development
+GLOBAL DEBUG_MODE IS FALSE.
+
+// All log_message / plog / debug output goes to this file
+GLOBAL LOG_FILE IS "0:/flight.log".
+
+// =========================================================================
 // LATLNG MANIPULATION
 // =========================================================================
 
@@ -53,16 +63,18 @@ FUNCTION great_circle_distance {
 }
 
 // Calculate compass bearing from one LATLNG to another (0-360 degrees)
+// Note: kOS SIN/COS take DEGREES. Do NOT convert to radians first.
+// kOS ARCTAN2 returns DEGREES directly — no RADTODEG multiplication needed.
 FUNCTION bearing_to_target {
     PARAMETER from_latlng, to_latlng.
 
-    LOCAL lat1 IS from_latlng:LAT * CONSTANT:DEGTORAD.
-    LOCAL lat2 IS to_latlng:LAT * CONSTANT:DEGTORAD.
-    LOCAL dLon IS (to_latlng:LNG - from_latlng:LNG) * CONSTANT:DEGTORAD.
+    LOCAL lat1 IS from_latlng:LAT.
+    LOCAL lat2 IS to_latlng:LAT.
+    LOCAL dLon IS to_latlng:LNG - from_latlng:LNG.
 
     LOCAL y IS SIN(dLon) * COS(lat2).
     LOCAL x IS COS(lat1) * SIN(lat2) - SIN(lat1) * COS(lat2) * COS(dLon).
-    LOCAL bearing IS ARCTAN2(y, x) * CONSTANT:RADTODEG.
+    LOCAL bearing IS ARCTAN2(y, x).
 
     RETURN MOD(bearing + 360, 360).
 }
@@ -72,6 +84,7 @@ FUNCTION bearing_to_target {
 // =========================================================================
 
 // Convert heading and pitch to direction vector
+// kOS SIN/COS take DEGREES — use heading_deg/pitch_deg directly.
 FUNCTION heading_vector {
     PARAMETER heading_deg, pitch_deg IS 0.
 
@@ -79,11 +92,8 @@ FUNCTION heading_vector {
     LOCAL east_vec IS VCRS(SHIP:UP:VECTOR, north_vec):NORMALIZED.
     LOCAL up_vec IS SHIP:UP:VECTOR.
 
-    LOCAL heading_rad IS heading_deg * CONSTANT:DEGTORAD.
-    LOCAL pitch_rad IS pitch_deg * CONSTANT:DEGTORAD.
-
-    RETURN (COS(pitch_rad) * (SIN(heading_rad) * east_vec + COS(heading_rad) * north_vec) +
-            SIN(pitch_rad) * up_vec):NORMALIZED.
+    RETURN (COS(pitch_deg) * (SIN(heading_deg) * east_vec + COS(heading_deg) * north_vec) +
+            SIN(pitch_deg) * up_vec):NORMALIZED.
 }
 
 // =========================================================================
@@ -220,21 +230,44 @@ FUNCTION format_time {
 // LOGGING
 // =========================================================================
 
-// Log message with timestamp
+// Print to screen AND write to LOG_FILE — use in test scripts and status output
+FUNCTION plog {
+    PARAMETER message.
+    PRINT message.
+    LOG message TO LOG_FILE.
+}
+
+// Mission phase log: always prints to screen with timestamp, always writes to file
 FUNCTION log_message {
-    PARAMETER message, filename IS "mission.log".
-
-    LOCAL time_str IS format_time(MISSIONTIME).
-    LOCAL log_entry IS "[" + time_str + "] " + message.
-
+    PARAMETER message.
+    LOCAL log_entry IS "[" + format_time(MISSIONTIME) + "] " + message.
     PRINT log_entry.
+    // Only write to archive if connected; local volume writes always attempted
+    IF LOG_FILE:STARTSWITH("0:/") {
+        IF HOMECONNECTION:ISCONNECTED {
+            LOG log_entry TO LOG_FILE.
+        }
+    } ELSE {
+        LOG log_entry TO LOG_FILE.
+    }
+}
 
-    IF EXISTS("0:/" + filename) {
-        LOG log_entry TO ("0:/" + filename).
+// Debug log: only prints/logs when DEBUG_MODE is TRUE
+FUNCTION debug {
+    PARAMETER message.
+    IF DEBUG_MODE {
+        LOCAL entry IS "[DBG " + format_time(MISSIONTIME) + "] " + message.
+        PRINT entry.
+        LOG entry TO LOG_FILE.
     }
-    ELSE {
-        LOG log_entry TO ("0:/" + filename).
-    }
+}
+
+// Enable or disable debug mode at runtime
+FUNCTION set_debug {
+    PARAMETER enabled.
+    SET DEBUG_MODE TO enabled.
+    IF enabled { plog("[DEBUG MODE ON]"). }
+    ELSE { plog("[DEBUG MODE OFF]"). }
 }
 
 // =========================================================================

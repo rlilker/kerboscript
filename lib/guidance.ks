@@ -50,7 +50,7 @@ FUNCTION predict_impact {
     // Timeout - return current position projection
     RETURN LATLNG(
         ARCSIN(pos_vec:Y / pos_vec:MAG) * CONSTANT:RADTODEG,
-        ARCTAN2(pos_vec:X / pos_vec:Z) * CONSTANT:RADTODEG
+        ARCTAN2(pos_vec:X, pos_vec:Z) * CONSTANT:RADTODEG
     ).
 }
 

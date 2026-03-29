@@ -102,18 +102,18 @@ FUNCTION execute_node {
 
     // Orient to node direction
     log_message("Orienting to burn direction...").
+    log_message("Burn window: T+" + ROUND(burn_start_time - TIME:SECONDS, 1) + "s").
     LOCK STEERING TO node_to_execute:DELTAV.
 
-    // Wait for alignment
+    // Wait for alignment — guard against near-zero deltav vector (causes VANG crash)
     LOCAL max_wait IS 60.
     LOCAL wait_start IS TIME:SECONDS.
-    WAIT UNTIL VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV) < 2 OR
+    WAIT UNTIL node_to_execute:DELTAV:MAG < 0.1 OR
+               VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV) < 2 OR
                (TIME:SECONDS - wait_start) > max_wait.
 
-    IF VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV) > 10 {
-        log_message("WARNING: Poor alignment for burn (" +
-                   ROUND(VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV), 1) + " degrees)").
-    }
+    LOCAL align_err IS VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV).
+    log_message("Aligned (" + ROUND(align_err, 1) + " deg). Waiting for burn window...").
 
     // Wait for burn time
     WAIT UNTIL TIME:SECONDS >= burn_start_time.
@@ -121,19 +121,28 @@ FUNCTION execute_node {
     // Execute burn
     log_message("Executing burn...").
     LOCAL remaining_dv IS node_to_execute:DELTAV:MAG.
-    LOCAL initial_mass IS SHIP:MASS.
 
     LOCK STEERING TO node_to_execute:DELTAV.
 
     UNTIL remaining_dv < 0.5 {
-        // Calculate throttle based on remaining dV
-        LOCAL max_accel IS SHIP:MAXTHRUST / SHIP:MASS.
-        LOCAL burn_time_remaining IS remaining_dv / max_accel.
+        // Stage if engines flamed out (e.g. booster separation mid-burn)
+        IF SHIP:MAXTHRUST = 0 {
+            log_message("Engines out mid-burn — staging...").
+            STAGE.
+            WAIT 1.
+            // Re-lock steering after staging clears the decoupler
+            LOCK STEERING TO node_to_execute:DELTAV.
+        }
+
+        LOCAL max_accel IS 0.
+        IF SHIP:MASS > 0 { SET max_accel TO SHIP:MAXTHRUST / SHIP:MASS. }
 
         LOCAL throttle_val IS 1.0.
-        IF burn_time_remaining < 3 {
-            // Reduce throttle near end of burn
-            SET throttle_val TO MAX(0.05, burn_time_remaining / 3).
+        IF max_accel > 0 {
+            LOCAL burn_time_remaining IS remaining_dv / max_accel.
+            IF burn_time_remaining < 3 {
+                SET throttle_val TO MAX(0.05, burn_time_remaining / 3).
+            }
         }
 
         LOCK THROTTLE TO throttle_val.
