@@ -143,8 +143,8 @@ The test suite runs on the launchpad without launching — there is no cost to m
 **Staging:**
 - `part:DECOUPLEDIN` = the stage number at which that part separates from the vessel
 - Stages count **down** (7→6→5…), so the **highest** `DECOUPLEDIN` among current parts = the next group to separate
-- Do not rely on `STAGE:NUMBER` matching `DECOUPLEDIN` — use `get_next_booster_stage()` from `ascent.ks` instead
-- `get_booster_decoupledin_values()` finds DECOUPLEDIN values of staging groups containing a "booster_*" tagged kOS processor — only those groups get threshold-based early staging; all others use flameout detection
+- Do not rely on `STAGE:NUMBER` matching `DECOUPLEDIN` — use `get_next_fuel_stage()` from `ascent.ks` instead
+- `is_booster_stage(stg)` checks if a staging group contains parts tagged "booster_*" — only these groups get threshold-based early staging; all others stage when empty (0%).
 - Boosters must stage with fuel remaining (default threshold: 20%) so they have delta-v for boostback and landing
 
 **Atmosphere:**

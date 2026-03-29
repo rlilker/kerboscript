@@ -9,6 +9,12 @@
 RUNONCEPATH("0:/lib/util.ks").
 
 // =========================================================================
+// STAGING STATE
+// =========================================================================
+
+GLOBAL LAST_STAGE_TIME IS 0.
+
+// =========================================================================
 // GRAVITY TURN PROFILE
 // =========================================================================
 
@@ -162,13 +168,32 @@ FUNCTION get_max_booster_decoupledin {
     RETURN max_dcpl.
 }
 
-// Get the DECOUPLEDIN values of staging groups that contain a booster kOS processor.
-// Only these groups get threshold-based early staging; others use flameout-only.
+// Get the DECOUPLEDIN value of the next staging group that will remove liquid fuel.
+// Filters out stages that have already been fired (activation stages).
+FUNCTION get_next_fuel_stage {
+    LOCAL max_dcpl IS -1.
+    LOCAL current_stg IS STAGE:NUMBER.
+    FOR part IN SHIP:PARTS {
+        LOCAL d IS part:DECOUPLEDIN.
+        // Only consider stages that haven't been fired yet (d <= current_stg)
+        IF d >= 0 AND d <= current_stg {
+            FOR res IN part:RESOURCES {
+                IF res:NAME = "LiquidFuel" AND res:AMOUNT > 0.1 {
+                    IF d > max_dcpl { SET max_dcpl TO d. }
+                }
+            }
+        }
+    }
+    RETURN max_dcpl.
+}
+
+// Get the DECOUPLEDIN values of ALL staging groups that contain parts
+// belonging to a booster (tagged "booster_*").
 FUNCTION get_booster_decoupledin_values {
     LOCAL result IS LIST().
     FOR part IN SHIP:PARTS {
-        IF part:HASMODULE("kOSProcessor") AND part:TAG:STARTSWITH("booster") {
-            IF part:DECOUPLEDIN > 0 AND NOT result:CONTAINS(part:DECOUPLEDIN) {
+        IF part:TAG:STARTSWITH("booster") {
+            IF part:DECOUPLEDIN >= 0 AND NOT result:CONTAINS(part:DECOUPLEDIN) {
                 result:ADD(part:DECOUPLEDIN).
             }
         }
@@ -176,120 +201,134 @@ FUNCTION get_booster_decoupledin_values {
     RETURN result.
 }
 
-// Find the DECOUPLEDIN value of the staging group closest to empty.
-// Only considers groups that contain a booster kOS processor (tagged "booster_*").
-// Falls back to DECOUPLEDIN > 1 approach if no booster processors are found.
+// Check if a specific staging group contains booster parts.
+FUNCTION is_booster_stage {
+    PARAMETER stg.
+    LOCAL booster_stages IS get_booster_decoupledin_values().
+    RETURN booster_stages:CONTAINS(stg).
+}
+
+// Alias for telemetry compatibility in launch.ks and test.ks
 FUNCTION get_next_booster_stage {
-    LOCAL booster_dcpl IS get_booster_decoupledin_values().
+    RETURN get_next_fuel_stage().
+}
 
-    // The kOS processor may be on a structural adapter (e.g. DCPL=6) while the actual
-    // fuel tanks burning in the booster are one stage lower (e.g. DCPL=5). Scan the
-    // entire booster assembly: all DECOUPLEDIN from 1 up to the processor's DECOUPLEDIN.
-    LOCAL max_booster_dcpl IS get_max_booster_decoupledin().
-
-    // Build a map of DECOUPLEDIN -> [fuel, capacity]
-    LOCAL groups IS LEXICON().
-
+// Get the total fuel percentage of the booster tanks that are due to be decoupled.
+// Identifies the highest stage S containing a booster CPU, then monitors fuel in S-1.
+FUNCTION get_booster_assembly_fuel {
+    LOCAL max_b_stg IS -1.
     FOR part IN SHIP:PARTS {
-        LOCAL dcpl IS part:DECOUPLEDIN.
-        LOCAL include IS FALSE.
-        IF booster_dcpl:LENGTH > 0 {
-            SET include TO dcpl > 0 AND dcpl <= max_booster_dcpl.
-        } ELSE {
-            SET include TO dcpl > 1.
+        IF part:TAG:STARTSWITH("booster") {
+            IF part:DECOUPLEDIN > max_b_stg AND part:DECOUPLEDIN <= STAGE:NUMBER {
+                SET max_b_stg TO part:DECOUPLEDIN.
+            }
         }
-
-        IF include {
+    }
+    
+    // If no boosters found, return -1
+    IF max_b_stg = -1 { RETURN -1. }
+    
+    // Monitor fuel ONLY in the stage that will actually be decoupled (S-1)
+    LOCAL monitor_stg IS max_b_stg.
+    IF max_b_stg > 0 { SET monitor_stg TO max_b_stg - 1. }
+    
+    LOCAL fuel IS 0.
+    LOCAL cap IS 0.
+    FOR part IN SHIP:PARTS {
+        IF part:DECOUPLEDIN = monitor_stg {
             FOR res IN part:RESOURCES {
-                IF res:NAME = "LiquidFuel" AND res:CAPACITY > 0 {
-                    LOCAL key IS dcpl:TOSTRING.
-                    IF NOT groups:HASKEY(key) {
-                        groups:ADD(key, LIST(0, 0)).
-                    }
-                    SET groups[key][0] TO groups[key][0] + res:AMOUNT.
-                    SET groups[key][1] TO groups[key][1] + res:CAPACITY.
+                IF res:NAME = "LiquidFuel" {
+                    SET fuel TO fuel + res:AMOUNT.
+                    SET cap TO cap + res:CAPACITY.
                 }
             }
         }
     }
-
-    LOCAL best_stg IS -1.
-    LOCAL best_pct IS 101.
-    LOCAL fallback_stg IS -1.
-
-    FOR key IN groups:KEYS {
-        LOCAL stg IS key:TONUMBER(0).
-        LOCAL fuel IS groups[key][0].
-        LOCAL cap  IS groups[key][1].
-        LOCAL pct  IS (fuel / cap) * 100.
-
-        IF pct < 100 {
-            IF pct < best_pct {
-                SET best_pct TO pct.
-                SET best_stg TO stg.
-            }
-        } ELSE {
-            IF stg > fallback_stg { SET fallback_stg TO stg. }
-        }
-    }
-
-    IF best_stg >= 0 { RETURN best_stg. }
-    RETURN fallback_stg.
+    
+    IF cap > 0 { RETURN (fuel / cap) * 100. }
+    RETURN 100. // Return 100 if monitored stage has no fuel tanks
 }
 
-// Print staging diagnostic info (call with DEBUG_MODE = TRUE to see output)
-FUNCTION debug_staging {
-    tdebug("--- Staging Diagnostic ---").
-    tdebug("STAGE:NUMBER = " + STAGE:NUMBER).
+// Log the fuel levels and booster status of all upcoming stages.
+FUNCTION log_staging_status {
+    tdebug("--- Staging Stack Diagnostic ---").
+    LOCAL stg_map IS LEXICON().
     FOR part IN SHIP:PARTS {
-        FOR res IN part:RESOURCES {
-            IF res:NAME = "LiquidFuel" AND res:CAPACITY > 0 {
-                tdebug("  " + part:NAME + "  DECOUPLEDIN=" + part:DECOUPLEDIN +
-                      "  LF=" + ROUND(res:AMOUNT,0) + "/" + ROUND(res:CAPACITY,0)).
+        LOCAL d IS part:DECOUPLEDIN.
+        IF d >= 0 {
+            LOCAL key IS d:TOSTRING.
+            IF NOT stg_map:HASKEY(key) {
+                stg_map:ADD(key, LIST(0, 0, FALSE)).
+            }
+            FOR res IN part:RESOURCES {
+                IF res:NAME = "LiquidFuel" {
+                    SET stg_map[key][0] TO stg_map[key][0] + res:AMOUNT.
+                    SET stg_map[key][1] TO stg_map[key][1] + res:CAPACITY.
+                }
+            }
+            IF part:TAG:STARTSWITH("booster") {
+                SET stg_map[key][2] TO TRUE.
             }
         }
     }
-    LOCAL next_stg IS get_next_booster_stage().
-    tdebug("Next booster stage group: DECOUPLEDIN=" + next_stg).
-    IF next_stg >= 0 {
-        tdebug("  Fuel in that group: " + ROUND(get_stage_fuel_percent(next_stg), 1) + "%").
+    
+    FOR k IN stg_map:KEYS {
+        LOCAL d IS k:TONUMBER().
+        IF d <= STAGE:NUMBER {
+            LOCAL f IS stg_map[k][0].
+            LOCAL c IS stg_map[k][1].
+            LOCAL b IS stg_map[k][2].
+            IF c > 0 {
+                tdebug(" STG " + d + ": " + ROUND(f/c*100,1) + "% fuel, BoosterTag=" + b).
+            }
+        }
     }
-    tdebug("--------------------------").
+    
+    LOCAL b_fuel IS get_booster_assembly_fuel().
+    tdebug(" Target Booster Tank Fuel (Decoupler Stage): " + ROUND(b_fuel, 1) + "%").
+    tdebug("--------------------------------").
 }
 
 // Check if staging is needed.
-// STAGE_FUEL_THRESHOLD applies only to booster groups (tagged "booster_*" kOS processors).
-// Non-booster groups use flameout detection only.
 FUNCTION check_staging_needed {
     PARAMETER fuel_threshold.
 
-    LOCAL next_stg IS get_next_booster_stage().
-    LOCAL booster_dcpl IS get_booster_decoupledin_values().
+    LOCAL now IS TIME:SECONDS.
+    LOCAL time_since_stg IS now - LAST_STAGE_TIME.
 
-    IF next_stg >= 0 {
-        LOCAL fuel_max IS get_stage_fuel_capacity(next_stg).
-        IF fuel_max > 0 {
-            LOCAL fuel_pct IS (get_stage_fuel(next_stg) / fuel_max) * 100.
-            // Apply threshold staging for any group within the booster assembly
-            LOCAL max_b_dcpl IS get_max_booster_decoupledin().
-            LOCAL is_booster_group IS booster_dcpl:LENGTH = 0 OR (next_stg > 0 AND next_stg <= max_b_dcpl).
-            IF is_booster_group {
-                tdebug("Booster fuel (DECOUPLEDIN=" + next_stg + "): " +
-                      ROUND(fuel_pct, 1) + "% / threshold " + fuel_threshold + "%").
-                RETURN fuel_pct < fuel_threshold.
-            }
+    // 1. Enforce minimum staging interval
+    IF time_since_stg < STAGING_MIN_INTERVAL {
+        RETURN FALSE.
+    }
+
+    // 2. Periodic Diagnostic Logging (every 5s)
+    IF MOD(ROUND(now), 5) = 0 {
+        log_staging_status().
+    }
+
+    // 3. Flameout detection (Primary trigger for all core/upper stages)
+    FOR eng IN SHIP:ENGINES {
+        IF eng:IGNITION AND eng:FLAMEOUT {
+            tlog("Staging: Flameout detected").
+            SET LAST_STAGE_TIME TO now.
+            RETURN TRUE.
         }
     }
 
-    // Fall back to flameout detection for non-booster stages and when no liquid fuel found
-    LOCAL engines_collection IS LIST().
-    LIST ENGINES IN engines_collection.
-    FOR eng IN engines_collection {
-        IF eng:IGNITION AND eng:FLAMEOUT AND eng:POSSIBLETHRUST > 10 {
-            tdebug("Flameout trigger: " + eng:NAME +
-                  " (" + ROUND(eng:POSSIBLETHRUST, 0) + " kN)").
-            RETURN TRUE.
-        }
+    // 4. Booster Assembly Threshold
+    // If the next boosters-to-decouple drop below threshold, stage.
+    LOCAL b_fuel IS get_booster_assembly_fuel().
+    IF b_fuel >= 0 AND b_fuel < fuel_threshold {
+        tlog("Staging: Booster assembly at " + ROUND(b_fuel, 1) + "%").
+        SET LAST_STAGE_TIME TO now.
+        RETURN TRUE.
+    }
+
+    // 5. Dead-Engine Recovery (e.g. activation stage with no engines)
+    IF SHIP:MAXTHRUST = 0 AND STAGE:NUMBER > 0 AND time_since_stg > 2.0 {
+        tlog("Staging: No thrust detected").
+        SET LAST_STAGE_TIME TO now.
+        RETURN TRUE.
     }
 
     RETURN FALSE.

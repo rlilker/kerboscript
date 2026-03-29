@@ -6,6 +6,7 @@
 
 @LAZYGLOBAL OFF.
 
+RUNONCEPATH("0:/config.ks").
 RUNONCEPATH("0:/lib/util.ks").
 RUNONCEPATH("0:/lib/guidance.ks").
 
@@ -13,26 +14,54 @@ RUNONCEPATH("0:/lib/guidance.ks").
 // SUICIDE BURN CALCULATION
 // =========================================================================
 
+// Get max thrust of ONLY currently ignited engines.
+// SHIP:MAXTHRUST can be misleading if some engines are deactivated or shutdown.
+FUNCTION get_active_max_thrust {
+    LOCAL total_thrust IS 0.
+    FOR eng IN SHIP:ENGINES {
+        IF eng:IGNITION AND NOT eng:FLAMEOUT {
+            SET total_thrust TO total_thrust + eng:POSSIBLETHRUST.
+        }
+    }
+    // Fallback to SHIP:MAXTHRUST if no engines reported ignition (e.g. at/before trigger)
+    IF total_thrust = 0 { RETURN SHIP:MAXTHRUST. }
+    RETURN total_thrust.
+}
+
 // Calculate altitude at which to start suicide burn
 FUNCTION calculate_suicide_burn_altitude {
     PARAMETER safety_margin IS 1.20.
 
     LOCAL speed IS SHIP:VELOCITY:SURFACE:MAG.
+    LOCAL v_up IS ABS(SHIP:VERTICALSPEED). // Use absolute vertical speed
     LOCAL g IS BODY:MU / (BODY:RADIUS + SHIP:ALTITUDE)^2.
 
     // Maximum deceleration available
-    LOCAL a_max IS SHIP:MAXTHRUST / SHIP:MASS.
-    LOCAL a_net IS a_max - g.
+    // Subtract some thrust for steering/instability
+    // Use a more conservative 0.90 multiplier to handle steering losses
+    LOCAL thrust_mult IS 0.90.
+    LOCAL active_max_thrust IS get_active_max_thrust().
+    LOCAL a_max IS (active_max_thrust * thrust_mult) / SHIP:MASS.
+
+    // Account for vertical component of thrust (assuming retrograde steering)
+    // If speed is much larger than v_up, we are tilted.
+    LOCAL cos_theta IS v_up / MAX(0.01, speed).
+
+    // Cap cos_theta to 0.95 even if perfectly vertical, to account for
+    // unavoidable steering corrections during the burn.
+    SET cos_theta TO MIN(0.95, cos_theta).
+
+    LOCAL a_net IS a_max * cos_theta - g.
 
     IF a_net <= 0 {
-        RETURN 99999.  // Can't stop - TWR too low
+        RETURN 99999.  // Can't stop - TWR too low or tilted too far
     }
 
-    // Stopping distance: d = v^2 / (2 * a_net)
-    LOCAL stop_dist IS speed^2 / (2 * a_net).
+    // Vertical distance needed to stop: d = v_up^2 / (2 * a_net)
+    LOCAL stop_dist IS v_up^2 / (2 * a_net).
 
-    // Apply safety margin
-    LOCAL burn_alt IS stop_dist * safety_margin.
+    // Apply safety margin and target altitude
+    LOCAL burn_alt IS stop_dist * safety_margin + SUICIDE_ALT_TARGET.
 
     RETURN burn_alt.
 }
@@ -54,24 +83,50 @@ FUNCTION should_start_suicide_burn {
 // Calculate throttle needed to maintain suicide burn profile
 FUNCTION calculate_suicide_throttle {
     LOCAL speed IS SHIP:VELOCITY:SURFACE:MAG.
+    LOCAL v_up IS SHIP:VERTICALSPEED.
     LOCAL altitude_m IS get_true_altitude().
     LOCAL g IS BODY:MU / (BODY:RADIUS + SHIP:ALTITUDE)^2.
 
+    LOCAL active_max_thrust IS get_active_max_thrust().
+
     // Avoid division by zero — no thrust available or at/below ground
-    IF SHIP:MAXTHRUST <= 0 { RETURN 0. }
-    IF altitude_m < 1 { RETURN 0. }
+    IF active_max_thrust <= 0 { RETURN 0. }
 
-    // Required deceleration to stop at current altitude
-    // a = v^2 / (2 * h)
-    LOCAL required_accel IS speed^2 / (2 * altitude_m).
+    // Target stopping at SUICIDE_ALT_TARGET
+    LOCAL available_dist IS altitude_m - SUICIDE_ALT_TARGET.
 
-    // Throttle needed to achieve this (accounting for gravity)
-    LOCAL throttle_val IS (required_accel + g) * SHIP:MASS / SHIP:MAXTHRUST.
+    // Vertical component of current facing (how much thrust goes UP)
+    // Use actual facing because steering takes time to align
+    LOCAL ship_up_dot IS VDOT(SHIP:FACING:VECTOR, SHIP:UP:VECTOR).
+    LOCAL cos_theta IS MAX(0.01, ship_up_dot).
+
+    IF available_dist < 2 {
+        // Below or very near target altitude - MUST stop descent
+        IF v_up < -0.5 {
+            // Still falling - use MAX thrust corrected for tilt
+            RETURN clamp(1.0 / cos_theta, 0, 1).
+        }
+        // Hovering or going up - maintain hover
+        LOCAL hover_throttle IS g * SHIP:MASS / (active_max_thrust * cos_theta).
+        RETURN clamp(hover_throttle, 0, 1).
+    }
+
+    // Required vertical deceleration to stop at target altitude
+    // Use absolute v_up to handle both descent and accidental ascent
+    LOCAL required_accel IS v_up^2 / (2 * available_dist).
+
+    // If already moving away from ground (v_up > 0), we don't need suicide thrust
+    IF v_up > 0 {
+        RETURN 0.
+    }
+
+    // Throttle needed (accounting for gravity and tilt)
+    // Add a 10% safety margin to required_accel to ensure we stay ahead of the curve
+    LOCAL throttle_val IS (required_accel * 1.10 + g) * SHIP:MASS / (active_max_thrust * cos_theta).
 
     // Clamp to valid range
     RETURN clamp(throttle_val, 0, 1).
 }
-
 // =========================================================================
 // LANDING STEERING
 // =========================================================================
@@ -91,12 +146,18 @@ FUNCTION get_landing_steering {
     // Above final approach: blend retrograde with vertical based on altitude
     LOCAL blend_factor IS clamp(1 - (altitude_m - final_approach_alt) / 1000, 0, 1).
 
-    // Also add lateral correction toward target
+    // Lateral correction
     LOCAL distance_to_target IS great_circle_distance(SHIP:GEOPOSITION, target_latlng).
+
+    // During suicide burn (or very low), prioritize vertical thrust over lateral correction.
+    // Limit correction weight to avoid excessive tilting when we need thrust.
+    LOCAL corr_weight IS 0.5.
+    IF altitude_m < 500 { SET corr_weight TO 0.2. }
+    IF altitude_m < 200 { SET corr_weight TO 0.05. }
 
     IF distance_to_target > 50 AND altitude_m > 100 {
         // Still have time to correct
-        LOCAL retro_corrected IS steer_retrograde_with_correction(target_latlng, 0.5).
+        LOCAL retro_corrected IS steer_retrograde_with_correction(target_latlng, corr_weight).
         RETURN blend_steering(retro_corrected, SHIP:UP:VECTOR, blend_factor).
     }
     ELSE {
@@ -123,6 +184,8 @@ FUNCTION execute_suicide_burn {
     UNTIL SHIP:STATUS = "LANDED" OR SHIP:STATUS = "SPLASHED" {
         LOCAL altitude_m IS get_true_altitude().
         LOCAL speed IS SHIP:VELOCITY:SURFACE:MAG.
+        LOCAL v_up IS SHIP:VERTICALSPEED.
+        LOCAL g IS BODY:MU / (BODY:RADIUS + SHIP:ALTITUDE)^2.
 
         // Deploy landing gear at appropriate altitude
         IF altitude_m < 100 AND NOT gear_deployed {
@@ -149,20 +212,31 @@ FUNCTION execute_suicide_burn {
         // Calculate throttle
         LOCAL throttle_val IS calculate_suicide_throttle().
 
-        // Fine control near ground
-        IF altitude_m < 20 {
-            // Very gentle throttle near ground
-            IF speed < 5 {
-                SET throttle_val TO clamp(speed / 10, 0.05, 0.3).
+        // Fine control near ground / touchdown
+        IF altitude_m < (SUICIDE_ALT_TARGET + 5) {
+            // Below target altitude or very close: transition to soft touchdown
+            IF speed < 10 {
+                // Aim for TOUCHDOWN_SPEED vertical descent
+                LOCAL target_v IS -TOUCHDOWN_SPEED.
+                LOCAL v_error IS target_v - v_up. // e.g. -1.5 - (-10) = +8.5 (falling too fast, need more thrust)
+                
+                // Simple proportional control for hover/touchdown (Kp=1.5)
+                LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, SHIP:MAXTHRUST).
+                SET throttle_val TO clamp(hover_throttle, 0.05, 0.8).
             }
         }
 
         // Kill throttle at very low altitude if nearly stopped
-        IF altitude_m < 0.5 OR (altitude_m < 3 AND speed < 0.5) {
+        IF altitude_m < 0.2 OR (altitude_m < 2 AND speed < 0.3) {
             SET throttle_val TO 0.
         }
 
         LOCK THROTTLE TO throttle_val.
+
+        // Periodically log status
+        IF MOD(ROUND(TIME:SECONDS * 10), 10) = 0 {
+            tlog("Burn: h=" + ROUND(altitude_m,0) + " v=" + ROUND(v_up,1) + " thr=" + ROUND(throttle_val*100,0) + "%").
+        }
 
         // Display telemetry
         LOCAL burn_info IS "Alt: " + ROUND(altitude_m, 0) + "m  Thr: " + ROUND(throttle_val*100, 0) + "%".
@@ -208,10 +282,28 @@ FUNCTION execute_landing {
         LOCAL wait_info IS "Waiting: alt=" + ROUND(altitude_m,0) + "m  burn@" + ROUND(burn_alt,0) + "m".
         show_booster_hud("WAITING FOR BURN ALT", wait_info).
 
-        WAIT 0.1.
+        WAIT 0.01. // Increased polling frequency for precision
     }
 
     // Execute suicide burn
+    LOCAL burn_alt IS calculate_suicide_burn_altitude(safety_margin).
+    LOCAL vel IS SHIP:VELOCITY:SURFACE:MAG.
+    LOCAL v_up IS SHIP:VERTICALSPEED.
+    LOCAL ship_mass IS SHIP:MASS.
+    LOCAL ship_max_thrust IS SHIP:MAXTHRUST.
+    LOCAL g IS BODY:MU / (BODY:RADIUS + SHIP:ALTITUDE)^2.
+    LOCAL a_max IS ship_max_thrust / ship_mass.
+    LOCAL cos_theta IS ABS(v_up) / MAX(0.01, vel).
+    LOCAL a_net IS a_max * cos_theta - g.
+    
+    tlog("--- SUICIDE BURN TRIGGER ---").
+    tlog("Alt: " + ROUND(get_true_altitude(), 1) + "m (BurnAlt: " + ROUND(burn_alt, 1) + "m)").
+    tlog("Vel: " + ROUND(vel, 1) + "m/s (Vup: " + ROUND(v_up, 1) + "m/s)").
+    tlog("TWR_net: " + ROUND(a_max/g, 2) + " (A_net: " + ROUND(a_net, 2) + "m/s2)").
+    tlog("Theta: " + ROUND(ARCCOS(clamp(cos_theta, -1, 1)), 1) + "deg").
+    tlog("Mass: " + ROUND(ship_mass, 1) + "t Thrust: " + ROUND(ship_max_thrust, 1) + "kN").
+    tlog("----------------------------").
+
     execute_suicide_burn(target_latlng, safety_margin).
 }
 

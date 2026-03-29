@@ -316,6 +316,10 @@ plog(" ").
 
 plog("Test 10: Landing math verification...").
 
+// Check config values used in math
+plog("  SUICIDE_ALT_TARGET: " + SUICIDE_ALT_TARGET + "m").
+plog("  LANDING_HEIGHT_OFFSET: " + LANDING_HEIGHT_OFFSET + "m").
+
 // Bearing test: a point 100km east of KSC should give ~270 bearing to KSC
 LOCAL east_of_ksc IS LATLNG(-0.0972, -73.64).
 LOCAL ksc_pos IS LATLNG(-0.0972, -74.5577).
@@ -371,19 +375,19 @@ IF all_passed {
 // =========================================================================
 
 plog("Test 11: Booster staging logic...").
-LOCAL booster_dcpl IS get_booster_decoupledin_values().
-IF booster_dcpl:LENGTH > 0 {
-    LOCAL dcpl_str IS "".
-    FOR d IN booster_dcpl {
-        IF dcpl_str:LENGTH > 0 { SET dcpl_str TO dcpl_str + ", ". }
-        SET dcpl_str TO dcpl_str + d.
+
+log_staging_status().
+
+LOCAL next_stg IS get_next_fuel_stage().
+IF next_stg > 0 {
+    plog("  Next fuel-bearing stage: STG=" + next_stg).
+    IF is_booster_stage(next_stg) {
+        plog("    ✓ This is a BOOSTER stage (threshold staging active)").
+    } ELSE {
+        plog("    - This is a CORE/OTHER stage (flameout staging active)").
     }
-    plog("  Booster DECOUPLEDIN groups (threshold staging): [" + dcpl_str + "]").
-    plog("  Other groups (flameout only): all others").
-    plog("    OK: only booster groups will early-stage").
 } ELSE {
-    plog("  No booster processors found — staging uses DECOUPLEDIN > 1 fallback").
-    plog("  (Set Name Tags to 'booster_N' in VAB for booster-specific staging)").
+    plog("  No fuel-bearing stages found (all fuel may be in root/final stage)").
 }
 plog(" ").
 

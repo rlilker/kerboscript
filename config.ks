@@ -16,7 +16,7 @@ RUNONCEPATH("0:/lib/telemetry.ks").
 // DEBUG / LOGGING
 // =========================================================================
 
-SET DEBUG_MODE TO FALSE.              // TRUE for verbose output to log file
+SET DEBUG_MODE TO TRUE.               // TRUE for verbose output to log file
 SET LOG_FILE TO "0:/flight.log".      // Log destination for launch and landing
 
 // =========================================================================
@@ -46,6 +46,8 @@ GLOBAL MAX_Q IS 25000.                // Max dynamic pressure (Pa) — throttle 
 
 GLOBAL STAGE_FUEL_THRESHOLD IS 20.   // Stage when booster liquid fuel drops below this % —
                                       // must be high enough to leave fuel for landing burns
+GLOBAL STAGING_MIN_INTERVAL IS 1.5.  // Minimum time between stage activations (s)
+                                      // Prevents runaway staging chain reactions.
 
 GLOBAL ENABLE_BOOSTER_RECOVERY IS TRUE.
 
@@ -61,7 +63,12 @@ GLOBAL LANDING_OFFSET_SPACING IS 10. // East-west spacing between booster landin
 // BOOSTER LANDING — FLIGHT PARAMETERS
 // =========================================================================
 
-GLOBAL SUICIDE_MARGIN IS 1.20.        // Safety factor on suicide burn altitude (1.0 = no margin)
+GLOBAL SUICIDE_MARGIN IS 1.55.        // Safety factor on suicide burn altitude (1.0 = no margin)
+GLOBAL SUICIDE_ALT_TARGET IS 12.      // Target altitude to reach zero velocity (m)
+                                      // Higher = safer soft-touchdown phase.
+GLOBAL LANDING_HEIGHT_OFFSET IS 15.   // Distance from root part to bottom of landing legs (m)
+                                      // Crucial: Set this if the booster is tall!
+                                      // If root is at top, use ~20-30m.
 GLOBAL GEAR_DEPLOY_ALT IS 100.        // Deploy landing gear below this altitude (m)
 GLOBAL FINAL_APPROACH_ALT IS 50.      // Switch to vertical attitude below this altitude (m)
 GLOBAL TOUCHDOWN_SPEED IS 1.5.        // Target touchdown vertical speed (m/s)
@@ -87,7 +94,7 @@ GLOBAL BOOSTBACK_KI IS 0.1.           // Integral gain for boostback throttle PI
 // FLIP MANEUVER
 // =========================================================================
 
-GLOBAL MAX_FLIP_TIME IS 30.           // Max time allowed to flip to retrograde (s)
+GLOBAL MAX_FLIP_TIME IS 60.           // Max time allowed to flip to retrograde (s)
 
 // =========================================================================
 

@@ -6,6 +6,7 @@
 
 @LAZYGLOBAL OFF.
 
+RUNONCEPATH("0:/config.ks").
 RUNONCEPATH("0:/lib/util.ks").
 
 // =========================================================================
@@ -156,10 +157,13 @@ FUNCTION steer_retrograde_with_correction {
 
 // Get true altitude above terrain (uses radar if available)
 FUNCTION get_true_altitude {
-    IF SHIP:ALTITUDE < 2500 AND ALT:RADAR > 0 {
-        RETURN ALT:RADAR.
+    LOCAL raw_alt IS 0.
+    IF ALT:RADAR > 0 AND ALT:RADAR < 10000 {
+        SET raw_alt TO ALT:RADAR.
+    } ELSE {
+        SET raw_alt TO SHIP:ALTITUDE - SHIP:GEOPOSITION:TERRAINHEIGHT.
     }
-    RETURN SHIP:ALTITUDE.
+    RETURN MAX(0, raw_alt - LANDING_HEIGHT_OFFSET).
 }
 
 // =========================================================================
