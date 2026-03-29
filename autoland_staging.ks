@@ -74,6 +74,8 @@ IF already_separated {
 LOCK THROTTLE TO 0.
 LOCK STEERING TO RETROGRADE.
 RCS ON.
+SET SHIP:CONTROL:NEUTRALIZE TO TRUE. // Clear any stuck inputs
+
 WAIT 1.0.        // Delay to move away from core before extending aero surfaces
 deploy_airbrakes().  // Top-mounted airbrakes: stabilise retrograde orientation + slow descent
 

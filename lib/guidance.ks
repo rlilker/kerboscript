@@ -135,19 +135,35 @@ FUNCTION steer_retrograde_with_correction {
     LOCAL retro_vec IS -SHIP:VELOCITY:SURFACE:NORMALIZED.
 
     // Correction component (steer toward target)
-    LOCAL predicted_impact IS predict_current_impact(120, 1.0).
+    LOCAL predicted_impact IS predict_current_impact(400, 1.0).
     LOCAL distance_error IS great_circle_distance(predicted_impact, target_latlng).
 
-    // Only apply correction if error is significant
-    IF distance_error < 100 {
+    // Also calculate bearing to target
+    LOCAL bearing IS bearing_to_target(predicted_impact, target_latlng).
+    
+    // Active RCS Lateral Translation
+    // Use RCS to push the vessel toward the target while coasting
+    IF distance_error > 100 AND SHIP:ALTITUDE > 5000 {
+        LOCAL target_vec IS (BODY:GEOPOSITIONLATLNG(target_latlng:LAT, target_latlng:LNG):POSITION - SHIP:POSITION):NORMALIZED.
+        LOCAL local_target IS SHIP:FACING:INVERSE * target_vec.
+        
+        // Translate toward target (Starboard/Top/Fore)
+        SET SHIP:CONTROL:STARBOARD TO local_target:X * 0.5.
+        SET SHIP:CONTROL:TOP TO local_target:Y * 0.5.
+    } ELSE {
+        SET SHIP:CONTROL:NEUTRALIZE TO TRUE.
+    }
+
+    // Only apply steering correction if error is significant
+    IF distance_error < 50 {
         RETURN retro_vec.
     }
 
-    LOCAL bearing IS bearing_to_target(predicted_impact, target_latlng).
     LOCAL correction_vec IS heading_vector(bearing, 0).
 
     // Blend retrograde with correction
-    LOCAL blend_factor IS MIN(1.0, distance_error / 5000) * correction_weight.
+    // Higher altitude = more weight on lateral correction
+    LOCAL blend_factor IS MIN(1.0, distance_error / 2000) * correction_weight.
     RETURN blend_steering(retro_vec, correction_vec, blend_factor).
 }
 

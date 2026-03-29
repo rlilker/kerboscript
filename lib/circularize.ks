@@ -115,8 +115,12 @@ FUNCTION execute_node {
     LOCAL align_err IS VANG(SHIP:FACING:VECTOR, node_to_execute:DELTAV).
     tlog("Aligned (" + ROUND(align_err, 1) + " deg). Waiting for burn window...").
 
-    // Wait for burn time
-    WAIT UNTIL TIME:SECONDS >= burn_start_time.
+    // Wait for burn time (with vertical speed fail-safe for shallow ascents)
+    UNTIL TIME:SECONDS >= burn_start_time OR (SHIP:ALTITUDE > BODY:ATM:HEIGHT AND SHIP:VERTICALSPEED < 5) {
+        LOCAL wait_info IS "Wait: " + ROUND(burn_start_time - TIME:SECONDS, 0) + "s  Vspd: " + ROUND(SHIP:VERTICALSPEED, 1) + "m/s".
+        show_launch_hud("WAITING FOR BURN", ROUND(SHIP:ALTITUDE/1000, 1), ROUND(SHIP:APOAPSIS/1000, 1), 0, 0, 0, 0, STAGE:NUMBER).
+        WAIT 0.1.
+    }
 
     // Execute burn
     tlog("Executing burn...").
