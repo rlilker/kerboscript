@@ -131,16 +131,26 @@ FUNCTION calculate_suicide_throttle {
 // LANDING STEERING
 // =========================================================================
 
+FUNCTION clear_landing_translation {
+    SET SHIP:CONTROL:STARBOARD TO 0.
+    SET SHIP:CONTROL:TOP TO 0.
+    SET SHIP:CONTROL:FORE TO 0.
+}
+
 // Get steering for landing approach
 FUNCTION get_landing_steering {
     PARAMETER target_latlng, final_approach_alt IS 50.
 
     LOCAL altitude_m IS get_true_altitude().
-    LOCAL speed IS SHIP:VELOCITY:SURFACE:MAG.
+
+    // Commit to a vertical landing below the correction cutoff.
+    IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT {
+        RETURN SHIP:UP:VECTOR.
+    }
 
     // Below final approach altitude: go fully vertical
     IF altitude_m < final_approach_alt {
-        RETURN SHIP:UP.
+        RETURN SHIP:UP:VECTOR.
     }
 
     // Above final approach: blend retrograde with vertical based on altitude
@@ -155,7 +165,7 @@ FUNCTION get_landing_steering {
     IF altitude_m < 500 { SET corr_weight TO 0.2. }
     IF altitude_m < 200 { SET corr_weight TO 0.05. }
 
-    IF distance_to_target > 50 AND altitude_m > 100 {
+    IF distance_to_target > 50 AND altitude_m > FINAL_CORRECTION_CUTOFF_ALT {
         // Still have time to correct
         LOCAL retro_corrected IS steer_retrograde_with_correction(target_latlng, corr_weight).
         RETURN blend_steering(retro_corrected, SHIP:UP:VECTOR, blend_factor).
@@ -200,13 +210,13 @@ FUNCTION execute_suicide_burn {
         }
 
         // Switch to final approach mode below 50m
-        IF altitude_m < 50 AND NOT final_approach {
+        IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT AND NOT final_approach {
             SET final_approach TO TRUE.
-            tlog("Final approach - transitioning to vertical").
+            tlog("Final approach - cancelling target correction and going vertical").
         }
 
         // Calculate steering
-        LOCAL steer_vec IS get_landing_steering(target_latlng, 50).
+        LOCAL steer_vec IS get_landing_steering(target_latlng, FINAL_APPROACH_ALT).
         LOCK STEERING TO steer_vec.
 
         // Calculate throttle
@@ -219,15 +229,18 @@ FUNCTION execute_suicide_burn {
                 // Aim for TOUCHDOWN_SPEED vertical descent
                 LOCAL target_v IS -TOUCHDOWN_SPEED.
                 LOCAL v_error IS target_v - v_up. // e.g. -1.5 - (-10) = +8.5 (falling too fast, need more thrust)
+                LOCAL active_max_thrust IS get_active_max_thrust().
+                LOCAL ship_up_dot IS VDOT(SHIP:FACING:VECTOR, SHIP:UP:VECTOR).
+                LOCAL cos_theta IS MAX(0.01, ship_up_dot).
 
                 // Simple proportional control for hover/touchdown (Kp=1.5)
-                LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, ship_max_thrust * cos_theta).
+                LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, active_max_thrust * cos_theta).
                 SET throttle_val TO clamp(hover_throttle, 0.05, 0.8).
             }
         }
 
-        // Active horizontal speed cancellation using RCS translation (below 50m)
-        IF altitude_m < 50 {
+        // Below the horizontal kill gate, stop correcting toward the target and only scrub lateral motion.
+        IF altitude_m < HORIZONTAL_KILL_ALT {
             LOCAL horizontal_vel IS SHIP:VELOCITY:SURFACE - VDOT(SHIP:VELOCITY:SURFACE, SHIP:UP:VECTOR) * SHIP:UP:VECTOR.
             IF horizontal_vel:MAG > 0.1 {
                 LOCAL local_hvel IS SHIP:FACING:INVERSE * horizontal_vel.
@@ -235,9 +248,10 @@ FUNCTION execute_suicide_burn {
                 SET SHIP:CONTROL:STARBOARD TO clamp(-local_hvel:X * 1.5, -1, 1).
                 SET SHIP:CONTROL:TOP TO clamp(-local_hvel:Y * 1.5, -1, 1).
             } ELSE {
-                SET SHIP:CONTROL:STARBOARD TO 0.
-                SET SHIP:CONTROL:TOP TO 0.
+                clear_landing_translation().
             }
+        } ELSE {
+            clear_landing_translation().
         }
 
         // Kill throttle at very low altitude if nearly stopped
@@ -290,8 +304,12 @@ FUNCTION execute_landing {
         LOCAL altitude_m IS get_true_altitude().
         LOCAL burn_alt IS calculate_suicide_burn_altitude(safety_margin).
 
-        // Steer retrograde with correction
-        LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.5).
+        IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT {
+            LOCK STEERING TO SHIP:UP:VECTOR.
+            clear_landing_translation().
+        } ELSE {
+            LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.5).
+        }
 
         // Update display
         LOCAL wait_info IS "Waiting: alt=" + ROUND(altitude_m,0) + "m  burn@" + ROUND(burn_alt,0) + "m".

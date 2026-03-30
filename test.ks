@@ -250,11 +250,10 @@ plog(" ").
 // =========================================================================
 
 plog("Test 8: Gravity turn profile...").
-// Current config: start=1500m, end=50000m, shape=1.5
-// shape>1 keeps the rocket near-vertical through thick lower atmosphere
-LOCAL ts IS 1500.   // TURN_START_ALTITUDE
-LOCAL te IS 50000.  // TURN_END_ALTITUDE
-LOCAL sh IS 1.5.    // TURN_SHAPE
+// Use the live config values so this test stays aligned with config.ks.
+LOCAL ts IS TURN_START_ALTITUDE.
+LOCAL te IS TURN_END_ALTITUDE.
+LOCAL sh IS TURN_SHAPE.
 plog("  Config: start=" + ts + "m  end=" + ROUND(te/1000,0) + "km  shape=" + sh).
 LOCAL p_0m   IS get_target_pitch(0,     ts, te, sh).
 LOCAL p_5k   IS get_target_pitch(5000,  ts, te, sh).

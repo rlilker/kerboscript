@@ -118,6 +118,26 @@ FUNCTION calculate_landing_offset {
     RETURN offset_pattern[offset_index] * LANDING_OFFSET_SPACING.
 }
 
+FUNCTION execute_separation_push {
+    PARAMETER booster_id.
+
+    LOCAL push_sign IS 1.
+    IF MOD(booster_id, 2) = 0 { SET push_sign TO -1. }
+
+    // Brief RCS pulse to open separation before the flip starts.
+    LOCAL push_vec IS V(push_sign * DECOUPLE_PUSH_STRENGTH, 0, -DECOUPLE_PUSH_STRENGTH * 0.6).
+    LOCAL push_end IS TIME:SECONDS + DECOUPLE_PUSH_DURATION.
+
+    tlog("Separation push: " + push_vec + " for " + ROUND(DECOUPLE_PUSH_DURATION, 2) + "s").
+
+    UNTIL TIME:SECONDS >= push_end {
+        SET SHIP:CONTROL:TRANSLATION TO push_vec.
+        WAIT 0.05.
+    }
+
+    SET SHIP:CONTROL:TRANSLATION TO V(0, 0, 0).
+}
+
 // =========================================================================
 // INITIALIZATION
 // =========================================================================
@@ -243,6 +263,7 @@ ON ABORT {
 }
 
 LOCAL target_latlng IS initialize_landing_system().
+execute_separation_push(assign_booster_id()).
 phase_separation_coast(target_latlng).
 phase_flip().
 phase_boostback(target_latlng).

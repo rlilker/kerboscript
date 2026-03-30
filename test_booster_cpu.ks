@@ -75,6 +75,8 @@ check("KSC_LON defined", DEFINED KSC_LON).
 check("SUICIDE_MARGIN defined", DEFINED SUICIDE_MARGIN).
 check("MAX_FLIP_TIME defined", DEFINED MAX_FLIP_TIME).
 check("BOOSTBACK_MAX_BURN_TIME defined", DEFINED BOOSTBACK_MAX_BURN_TIME).
+check("FINAL_CORRECTION_CUTOFF_ALT defined", DEFINED FINAL_CORRECTION_CUTOFF_ALT).
+check("DECOUPLE_PUSH_STRENGTH defined", DEFINED DECOUPLE_PUSH_STRENGTH).
 
 // Test 5: Bearing math (core to boostback guidance)
 PRINT " ".
@@ -115,4 +117,3 @@ IF HOMECONNECTION:ISCONNECTED {
     // No connection -- write result to archive when available, or just continue
     LOG result TO ("0:/" + tag + "_diag_result.log").
 }
-

@@ -72,8 +72,12 @@ GLOBAL LANDING_HEIGHT_OFFSET IS 15.   // Distance from root part to bottom of la
                                       // If root is at top, use ~20-30m.
 GLOBAL GEAR_DEPLOY_ALT IS 100.        // Deploy landing gear below this altitude (m)
 GLOBAL FINAL_APPROACH_ALT IS 50.      // Switch to vertical attitude below this altitude (m)
+GLOBAL FINAL_CORRECTION_CUTOFF_ALT IS 120. // Stop target-chasing below this altitude (m)
+GLOBAL HORIZONTAL_KILL_ALT IS 60.     // Use RCS only to kill horizontal speed below this altitude (m)
 GLOBAL TOUCHDOWN_SPEED IS 1.5.        // Target touchdown vertical speed (m/s)
 GLOBAL AIRBRAKE_DEPLOY_ALT IS 70000.  // Deploy airbrakes below this altitude (m)
+GLOBAL DECOUPLE_PUSH_DURATION IS 1.0. // Seconds of RCS push immediately after separation
+GLOBAL DECOUPLE_PUSH_STRENGTH IS 0.35. // RCS translation strength for the separation nudge
 
 // =========================================================================
 // BOOSTER LANDING — ENTRY BURN
