@@ -137,14 +137,66 @@ FUNCTION clear_landing_translation {
     SET SHIP:CONTROL:FORE TO 0.
 }
 
+FUNCTION get_horizontal_component {
+    PARAMETER vec.
+    RETURN vec - VDOT(vec, SHIP:UP:VECTOR) * SHIP:UP:VECTOR.
+}
+
+FUNCTION apply_terminal_rcs_guidance {
+    PARAMETER target_latlng, altitude_m.
+
+    LOCAL target_pos IS BODY:GEOPOSITIONLATLNG(target_latlng:LAT, target_latlng:LNG):POSITION.
+    LOCAL horizontal_error IS get_horizontal_component(target_pos - SHIP:POSITION).
+    LOCAL horizontal_vel IS get_horizontal_component(SHIP:VELOCITY:SURFACE).
+
+    // Project onto actual ship axes for better control when tilted
+    LOCAL error_starboard IS VDOT(horizontal_error, SHIP:FACING:RIGHTVECTOR).
+    LOCAL error_top IS VDOT(horizontal_error, SHIP:FACING:UPVECTOR).
+    
+    LOCAL vel_starboard IS VDOT(horizontal_vel, SHIP:FACING:RIGHTVECTOR).
+    LOCAL vel_top IS VDOT(horizontal_vel, SHIP:FACING:UPVECTOR).
+
+    LOCAL pos_gain IS TERMINAL_RCS_POSITION_GAIN.
+    IF altitude_m < HORIZONTAL_KILL_ALT OR horizontal_error:MAG < LANDING_TARGET_TOLERANCE {
+        SET pos_gain TO 0.
+    }
+
+    LOCAL starboard_cmd IS clamp(error_starboard * pos_gain - vel_starboard * TERMINAL_RCS_VELOCITY_GAIN, -1, 1).
+    LOCAL top_cmd IS clamp(error_top * pos_gain - vel_top * TERMINAL_RCS_VELOCITY_GAIN, -1, 1).
+
+    // Reduced deadzone for more precise terminal control
+    IF ABS(starboard_cmd) < 0.02 { SET starboard_cmd TO 0. }
+    IF ABS(top_cmd) < 0.02 { SET top_cmd TO 0. }
+
+    SET SHIP:CONTROL:STARBOARD TO starboard_cmd.
+    SET SHIP:CONTROL:TOP TO top_cmd.
+    SET SHIP:CONTROL:FORE TO 0.
+}
+
 // Get steering for landing approach
 FUNCTION get_landing_steering {
-    PARAMETER target_latlng, final_approach_alt IS 50.
+    PARAMETER target_latlng, final_approach_alt IS 50, kill_horizontal_only IS FALSE.
 
     LOCAL altitude_m IS get_true_altitude().
+    LOCAL horizontal_vel IS get_horizontal_component(SHIP:VELOCITY:SURFACE).
 
-    // Commit to a vertical landing below the correction cutoff.
-    IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT {
+    // Below 15m or very low horizontal speed: go fully vertical
+    IF altitude_m < 15 OR horizontal_vel:MAG < 0.1 {
+        RETURN SHIP:UP:VECTOR.
+    }
+
+    // Commit to a vertical landing below the correction cutoff OR if specifically requested.
+    // MODIFIED: If we still have horizontal speed, tilt to kill it with main engine.
+    IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT OR kill_horizontal_only {
+        IF horizontal_vel:MAG > 0.2 {
+            // Kill horizontal velocity by tilting against it.
+            // 1 m/s error -> ~3 degrees tilt. Max 15 degrees.
+            LOCAL tilt_angle IS clamp(horizontal_vel:MAG * 3, 0, 15).
+            LOCAL tilt_dir IS -horizontal_vel:NORMALIZED.
+            
+            // Blend UP with the tilt direction using TAN for correct vector geometry
+            RETURN (SHIP:UP:VECTOR + tilt_dir * TAN(tilt_angle)):NORMALIZED.
+        }
         RETURN SHIP:UP:VECTOR.
     }
 
@@ -165,7 +217,7 @@ FUNCTION get_landing_steering {
     IF altitude_m < 500 { SET corr_weight TO 0.2. }
     IF altitude_m < 200 { SET corr_weight TO 0.05. }
 
-    IF distance_to_target > 50 AND altitude_m > FINAL_CORRECTION_CUTOFF_ALT {
+    IF distance_to_target > LANDING_TARGET_TOLERANCE AND altitude_m > FINAL_CORRECTION_CUTOFF_ALT {
         // Still have time to correct
         LOCAL retro_corrected IS steer_retrograde_with_correction(target_latlng, corr_weight).
         RETURN blend_steering(retro_corrected, SHIP:UP:VECTOR, blend_factor).
@@ -215,8 +267,8 @@ FUNCTION execute_suicide_burn {
             tlog("Final approach - cancelling target correction and going vertical").
         }
 
-        // Calculate steering
-        LOCAL steer_vec IS get_landing_steering(target_latlng, FINAL_APPROACH_ALT).
+        // Calculate steering - Focus on "straight and soft" (velocity kill only) during suicide burn
+        LOCAL steer_vec IS get_landing_steering(target_latlng, FINAL_APPROACH_ALT, TRUE).
         LOCK STEERING TO steer_vec.
 
         // Calculate throttle
@@ -239,20 +291,9 @@ FUNCTION execute_suicide_burn {
             }
         }
 
-        // Below the horizontal kill gate, stop correcting toward the target and only scrub lateral motion.
-        IF altitude_m < HORIZONTAL_KILL_ALT {
-            LOCAL horizontal_vel IS SHIP:VELOCITY:SURFACE - VDOT(SHIP:VELOCITY:SURFACE, SHIP:UP:VECTOR) * SHIP:UP:VECTOR.
-            IF horizontal_vel:MAG > 0.1 {
-                LOCAL local_hvel IS SHIP:FACING:INVERSE * horizontal_vel.
-                // Translate in opposite direction of horizontal velocity to "scrub" it off
-                SET SHIP:CONTROL:STARBOARD TO clamp(-local_hvel:X * 1.5, -1, 1).
-                SET SHIP:CONTROL:TOP TO clamp(-local_hvel:Y * 1.5, -1, 1).
-            } ELSE {
-                clear_landing_translation().
-            }
-        } ELSE {
-            clear_landing_translation().
-        }
+        // Terminal RCS guidance: use velocity damping only during the suicide burn
+        // Passing HORIZONTAL_KILL_ALT as altitude_m forces pos_gain to 0 in apply_terminal_rcs_guidance
+        apply_terminal_rcs_guidance(target_latlng, MIN(altitude_m, HORIZONTAL_KILL_ALT - 1)).
 
         // Kill throttle at very low altitude if nearly stopped
         IF altitude_m < 0.2 OR (altitude_m < 2 AND speed < 0.3) {

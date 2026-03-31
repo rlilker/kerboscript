@@ -72,11 +72,15 @@ IF already_separated {
 // =========================================================================
 
 LOCK THROTTLE TO 0.
-LOCK STEERING TO RETROGRADE.
 RCS ON.
-SET SHIP:CONTROL:NEUTRALIZE TO TRUE. // Clear any stuck inputs
+SET SHIP:CONTROL:NEUTRALIZE TO TRUE.
 
-WAIT 1.0.        // Delay to move away from core before extending aero surfaces
+// Execute separation push IMMEDIATELY to clear the core
+// (Function defined below, but kOS allows calling functions before definition in the same file)
+execute_separation_push(assign_booster_id()).
+
+LOCK STEERING TO RETROGRADE.
+WAIT 1.5.        // Increased delay to move away from core before extending aero surfaces
 deploy_airbrakes().  // Top-mounted airbrakes: stabilise retrograde orientation + slow descent
 
 // After physical separation, archive (0:/) requires an antenna connection to KSC.
@@ -263,7 +267,6 @@ ON ABORT {
 }
 
 LOCAL target_latlng IS initialize_landing_system().
-execute_separation_push(assign_booster_id()).
 phase_separation_coast(target_latlng).
 phase_flip().
 phase_boostback(target_latlng).
