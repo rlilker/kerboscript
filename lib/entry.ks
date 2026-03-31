@@ -97,9 +97,9 @@ FUNCTION coast_to_landing_altitude {
 
         // Active Trajectory Correction (Coast Nudge)
         // If error is high and we are high enough, use tiny engine throttle to move impact point.
-        IF distance_error > 200 AND SHIP:ALTITUDE > 5000 {
+        IF distance_error > 500 AND SHIP:ALTITUDE > 5000 {
             LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.6).
-            LOCK THROTTLE TO 0.10. // 10% nudge
+            LOCK THROTTLE TO 0.05. // 5% nudge
         }
         ELSE {
             LOCK THROTTLE TO 0.

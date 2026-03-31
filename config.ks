@@ -64,7 +64,7 @@ GLOBAL LANDING_OFFSET_SPACING IS 10. // East-west spacing between booster landin
 // BOOSTER LANDING — FLIGHT PARAMETERS
 // =========================================================================
 
-GLOBAL SUICIDE_MARGIN IS 1.55.        // Safety factor on suicide burn altitude (1.0 = no margin)
+GLOBAL SUICIDE_MARGIN IS 1.25.        // Safety factor on suicide burn altitude (1.0 = no margin)
 GLOBAL SUICIDE_ALT_TARGET IS 12.      // Target altitude to reach zero velocity (m)
                                       // Higher = safer soft-touchdown phase.
 GLOBAL LANDING_HEIGHT_OFFSET IS 15.   // Distance from root part to bottom of landing legs (m)
@@ -79,7 +79,7 @@ GLOBAL TERMINAL_RCS_POSITION_GAIN IS 0.08. // Increased for more aggressive targ
 GLOBAL TERMINAL_RCS_VELOCITY_GAIN IS 5.0. // Increased from 3.5 to combat engine gimbal drift
 GLOBAL TOUCHDOWN_SPEED IS 1.5.        // Target touchdown vertical speed (m/s)
 GLOBAL AIRBRAKE_DEPLOY_ALT IS 70000.  // Deploy airbrakes below this altitude (m)
-GLOBAL DECOUPLE_PUSH_DURATION IS 1.2. // Reduced from 2.0s
+GLOBAL DECOUPLE_PUSH_DURATION IS 0.6. // Reduced from 1.2s
 GLOBAL DECOUPLE_PUSH_STRENGTH IS 0.45. // Reduced from 0.85
 
 // =========================================================================
@@ -94,7 +94,7 @@ GLOBAL ENTRY_BURN_ALTITUDE IS 15000.  // Altitude at which to check for entry bu
 // =========================================================================
 
 GLOBAL BOOSTBACK_MAX_BURN_TIME IS 60. // Max boostback burn duration (s)
-GLOBAL BOOSTBACK_TARGET_ERROR IS 500. // Stop boostback when predicted impact within this range (m)
+GLOBAL BOOSTBACK_TARGET_ERROR IS 250. // Stop boostback when predicted impact within this range (m)
 GLOBAL BOOSTBACK_KP IS 0.5.           // Proportional gain for boostback throttle PI controller
 GLOBAL BOOSTBACK_KI IS 0.1.           // Integral gain for boostback throttle PI controller
 

@@ -143,7 +143,7 @@ FUNCTION steer_retrograde_with_correction {
     
     // Active RCS Lateral Translation
     // Use RCS to push the vessel toward the target while coasting
-    IF distance_error > (LANDING_TARGET_TOLERANCE * 2) AND SHIP:ALTITUDE > 5000 {
+    IF distance_error > (LANDING_TARGET_TOLERANCE * 2) AND SHIP:ALTITUDE > 500 {
         LOCAL target_vec IS (BODY:GEOPOSITIONLATLNG(target_latlng:LAT, target_latlng:LNG):POSITION - SHIP:POSITION):NORMALIZED.
         LOCAL local_target IS SHIP:FACING:INVERSE * target_vec.
         

@@ -186,17 +186,7 @@ FUNCTION get_landing_steering {
     }
 
     // Commit to a vertical landing below the correction cutoff OR if specifically requested.
-    // MODIFIED: If we still have horizontal speed, tilt to kill it with main engine.
     IF altitude_m < FINAL_CORRECTION_CUTOFF_ALT OR kill_horizontal_only {
-        IF horizontal_vel:MAG > 0.2 {
-            // Kill horizontal velocity by tilting against it.
-            // 1 m/s error -> ~3 degrees tilt. Max 15 degrees.
-            LOCAL tilt_angle IS clamp(horizontal_vel:MAG * 3, 0, 15).
-            LOCAL tilt_dir IS -horizontal_vel:NORMALIZED.
-            
-            // Blend UP with the tilt direction using TAN for correct vector geometry
-            RETURN (SHIP:UP:VECTOR + tilt_dir * TAN(tilt_angle)):NORMALIZED.
-        }
         RETURN SHIP:UP:VECTOR.
     }
 
@@ -287,7 +277,7 @@ FUNCTION execute_suicide_burn {
 
                 // Simple proportional control for hover/touchdown (Kp=1.5)
                 LOCAL hover_throttle IS (g + v_error * 1.5) * SHIP:MASS / MAX(0.1, active_max_thrust * cos_theta).
-                SET throttle_val TO clamp(hover_throttle, 0.05, 0.8).
+                SET throttle_val TO clamp(hover_throttle, 0.05, 1.0).
             }
         }
 
