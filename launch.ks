@@ -53,17 +53,6 @@ FUNCTION initialize_mission {
         RETURN FALSE.
     }
 
-    // Verify vessel readiness — wait up to 10s for engines to be staged
-    IF SHIP:MAXTHRUST = 0 {
-        PRINT "Engines not active — stage once to activate, then waiting...".
-        LOCAL engine_wait IS TIME:SECONDS + 10.
-        WAIT UNTIL SHIP:MAXTHRUST > 0 OR TIME:SECONDS > engine_wait.
-        IF SHIP:MAXTHRUST = 0 {
-            PRINT "ERROR: No active engines after 10s. Stage and re-run.".
-            RETURN FALSE.
-        }
-    }
-
     // Load autoland scripts onto booster processors
     IF ENABLE_BOOSTER_RECOVERY {
         IF NOT EXISTS("0:/autoland_staging.ks") {
@@ -73,9 +62,6 @@ FUNCTION initialize_mission {
             setup_booster_processors().
         }
     }
-
-    PRINT " ".
-    PRINT "Press SPACE to launch...".
 
     RETURN TRUE.
 }
@@ -323,7 +309,13 @@ FUNCTION main {
         RETURN.
     }
 
-    // Wait for launch command (or auto-launch after countdown)
+    // Automatic Staging & Countdown
+    IF SHIP:MAXTHRUST = 0 {
+        tlog("Engines inactive - staging to activate...").
+        STAGE.
+        WAIT 0.5.
+    }
+
     PRINT "T-10 seconds...".
     FROM {LOCAL t IS 10.} UNTIL t = 0 STEP {SET t TO t - 1.} DO {
         PRINT "T-" + t + " seconds...          " AT(0, 9).
@@ -331,6 +323,7 @@ FUNCTION main {
     }
 
     tlog("LIFTOFF!").
+    SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 1.0.
 
     // Execute launch sequence
     phase_vertical_ascent().
