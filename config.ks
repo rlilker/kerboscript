@@ -58,8 +58,8 @@ GLOBAL ENABLE_BOOSTER_RECOVERY IS TRUE.
 // LANDING ZONE
 // =========================================================================
 
-GLOBAL KSC_LAT IS -0.0972.           // Target landing latitude  (KSC launchpad)
-GLOBAL KSC_LON IS -74.5577.          // Target landing longitude (KSC launchpad)
+GLOBAL KSC_LAT IS -0.0486.           // Target landing latitude  (KSC Runway 09)
+GLOBAL KSC_LON IS -74.7244.          // Target landing longitude (KSC Runway 09)
 GLOBAL LANDING_OFFSET_SPACING IS 10. // East-west spacing between booster landing zones (m)
 
 // =========================================================================

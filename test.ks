@@ -323,21 +323,21 @@ plog("  SUICIDE_ALT_TARGET: " + SUICIDE_ALT_TARGET + "m").
 plog("  LANDING_HEIGHT_OFFSET: " + LANDING_HEIGHT_OFFSET + "m").
 
 // Bearing test: a point 100km east of KSC should give ~270 bearing to KSC
-LOCAL east_of_ksc IS LATLNG(-0.0972, -73.64).
-LOCAL ksc_pos IS LATLNG(-0.0972, -74.5577).
+LOCAL east_of_ksc IS LATLNG(-0.0486, -73.72).
+LOCAL ksc_pos IS LATLNG(-0.0486, -74.7244).
 LOCAL test_bearing IS bearing_to_target(east_of_ksc, ksc_pos).
-plog("  Bearing from 100km E of KSC to KSC: " + ROUND(test_bearing, 1) + "° (expected ~270)").
+plog("  Bearing from 100km E of KSC (Runway) to Runway: " + ROUND(test_bearing, 1) + "° (expected ~270)").
 IF ABS(test_bearing - 270) < 15 {
-    plog("    OK: bearing math correct — boostback will steer toward KSC").
+    plog("    OK: bearing math correct — boostback will steer toward runway").
 } ELSE {
     plog("    FAIL: bearing wrong — boostback will steer AWAY from target").
     SET all_passed TO FALSE.
 }
 
 // Bearing test 2: a point north of KSC should give ~180 (south) to KSC
-LOCAL north_of_ksc IS LATLNG(1.0, -74.5577).
+LOCAL north_of_ksc IS LATLNG(1.0, -74.7244).
 LOCAL test_bearing2 IS bearing_to_target(north_of_ksc, ksc_pos).
-plog("  Bearing from N of KSC to KSC: " + ROUND(test_bearing2, 1) + "° (expected ~180)").
+plog("  Bearing from N of Runway to Runway: " + ROUND(test_bearing2, 1) + "° (expected ~180)").
 IF ABS(test_bearing2 - 180) < 15 {
     plog("    OK").
 } ELSE {

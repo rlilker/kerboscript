@@ -339,6 +339,7 @@ FUNCTION main {
     phase_circularization().
 
     // Mission complete
+    SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
     UNLOCK STEERING.
     UNLOCK THROTTLE.
 
