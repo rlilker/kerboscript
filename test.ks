@@ -255,22 +255,25 @@ LOCAL ts IS TURN_START_ALTITUDE.
 LOCAL te IS TURN_END_ALTITUDE.
 LOCAL sh IS TURN_SHAPE.
 plog("  Config: start=" + ts + "m  end=" + ROUND(te/1000,0) + "km  shape=" + sh).
+plog("  ETA Target: " + ASCENT_ETA_APOAPSIS_TARGET + "s").
+
 LOCAL p_0m   IS get_target_pitch(0,     ts, te, sh).
 LOCAL p_5k   IS get_target_pitch(5000,  ts, te, sh).
-LOCAL p_10k  IS get_target_pitch(10000, ts, te, sh).
-LOCAL p_20k  IS get_target_pitch(20000, ts, te, sh).
+LOCAL p_15k  IS get_target_pitch(15000, ts, te, sh).
 LOCAL p_30k  IS get_target_pitch(30000, ts, te, sh).
-LOCAL p_40k  IS get_target_pitch(40000, ts, te, sh).
-LOCAL p_55k  IS get_target_pitch(55000, ts, te, sh).
+LOCAL p_45k  IS get_target_pitch(45000, ts, te, sh).
+LOCAL p_60k  IS get_target_pitch(60000, ts, te, sh).
+LOCAL p_70k  IS get_target_pitch(70000, ts, te, sh).
 plog("  Pitch at  0m:  " + ROUND(p_0m,  1) + "° (expected 90° — below turn start)").
-plog("  Pitch at  5km: " + ROUND(p_5k,  1) + "° (should be near-vertical, ~88°)").
-plog("  Pitch at 10km: " + ROUND(p_10k, 1) + "° (should be >80°)").
-plog("  Pitch at 20km: " + ROUND(p_20k, 1) + "°").
+plog("  Pitch at  5km: " + ROUND(p_5k,  1) + "° (should be near-vertical, >88°)").
+plog("  Pitch at 15km: " + ROUND(p_15k, 1) + "° (should be >80°)").
 plog("  Pitch at 30km: " + ROUND(p_30k, 1) + "°").
-plog("  Pitch at 40km: " + ROUND(p_40k, 1) + "°").
-plog("  Pitch at 55km: " + ROUND(p_55k, 1) + "° (expected 0° — above turn end)").
-IF ABS(p_0m - 90) < 1 AND ABS(p_55k) < 1 AND p_5k > 85 AND p_10k > 78 {
-    plog("    ✓ Profile correct — stays near-vertical through lower atmosphere").
+plog("  Pitch at 45km: " + ROUND(p_45k, 1) + "°").
+plog("  Pitch at 60km: " + ROUND(p_60k, 1) + "°").
+plog("  Pitch at 70km: " + ROUND(p_70k, 1) + "° (expected 0° — above turn end)").
+
+IF ABS(p_0m - 90) < 1 AND ABS(p_70k) < 1 AND p_5k > 88 AND p_15k > 80 {
+    plog("    ✓ Profile correct — stays vertical longer through lower atmosphere").
 } ELSE {
     plog("    ✗ Profile may be too aggressive in lower atmosphere").
     SET all_passed TO FALSE.

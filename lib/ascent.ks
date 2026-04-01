@@ -99,14 +99,35 @@ FUNCTION get_apoapsis_throttle {
     RETURN 1.0.  // Full throttle when far from target
 }
 
+// Calculate throttle to maintain target time-to-apoapsis.
+// Prevents apoapsis from "running away" too far ahead of the vessel.
+FUNCTION get_eta_throttle {
+    PARAMETER target_eta, margin IS 10.
+
+    // No meaningful ETA while below the turn start altitude
+    IF SHIP:ALTITUDE < TURN_START_ALTITUDE { RETURN 1.0. }
+
+    LOCAL current_eta IS ETA:APOAPSIS.
+
+    // If ETA is too high, reduce throttle.
+    IF current_eta > (target_eta + margin) {
+        // Linear reduction: starts at target+margin, reaches 0.5 at target+2*margin
+        LOCAL reduction IS 1.0 - (current_eta - (target_eta + margin)) / margin.
+        RETURN MAX(0.5, reduction).
+    }
+
+    RETURN 1.0.
+}
+
 // Combined throttle control (takes minimum of all limits)
 FUNCTION get_ascent_throttle {
     PARAMETER target_ap, max_q.
 
     LOCAL q_throttle IS get_q_limited_throttle(max_q).
     LOCAL ap_throttle IS get_apoapsis_throttle(target_ap, SHIP:APOAPSIS).
+    LOCAL eta_throttle IS get_eta_throttle(ASCENT_ETA_APOAPSIS_TARGET, 15).
 
-    RETURN MIN(q_throttle, ap_throttle).
+    RETURN MIN(q_throttle, MIN(ap_throttle, eta_throttle)).
 }
 
 // =========================================================================
