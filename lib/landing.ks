@@ -265,7 +265,7 @@ FUNCTION execute_suicide_burn {
         LOCAL throttle_val IS calculate_suicide_throttle().
 
         // Fine control near ground / touchdown
-        IF altitude_m < (SUICIDE_ALT_TARGET + 5) {
+        IF altitude_m < (SUICIDE_ALT_TARGET + 2) {
             // Below target altitude or very close: transition to soft touchdown
             IF speed < 15 {
                 // Aim for TOUCHDOWN_SPEED vertical descent
@@ -285,8 +285,8 @@ FUNCTION execute_suicide_burn {
         // Passing HORIZONTAL_KILL_ALT as altitude_m forces pos_gain to 0 in apply_terminal_rcs_guidance
         apply_terminal_rcs_guidance(target_latlng, MIN(altitude_m, HORIZONTAL_KILL_ALT - 1)).
 
-        // Kill throttle at very low altitude if nearly stopped
-        IF altitude_m < 0.2 OR (altitude_m < 2 AND speed < 0.3) {
+        // Kill throttle at actual touchdown (status change) or if nearly stopped at ground level
+        IF SHIP:STATUS = "LANDED" OR SHIP:STATUS = "SPLASHED" OR (altitude_m < 1 AND ABS(v_up) < 0.5) {
             SET throttle_val TO 0.
             SET SHIP:CONTROL:NEUTRALIZE TO TRUE.
         }

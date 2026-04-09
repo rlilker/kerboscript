@@ -10,9 +10,15 @@ kOS autopilot for the **Ike I** rocket: gravity turn ascent, asparagus staging, 
 Ships/Script/
 ├── launch.ks              # Main launch autopilot (run this to launch)
 ├── autoland_staging.ks    # Booster RTLS landing — runs independently on each separated booster
-├── test.ks                # Pre-flight test suite
+├── autoland_boot.ks       # Minimal boot stub: switches to archive and runs autoland_staging.ks
+├── config.ks              # All tunable parameters (DEBUG_MODE, LOG_FILE, orbital targets, etc.)
+├── test.ks                # Pre-flight test suite (Tests 0–13)
+├── test_booster_cpu.ks    # Booster CPU diagnostic — run by test.ks Test 12 on each booster
+├── boot/
+│   └── launch_system.ks   # Main vessel boot script: runs test.ks then launch.ks
 └── lib/
-    ├── util.ks            # Shared foundation: logging, LATLNG math, DEBUG_MODE
+    ├── util.ks            # Math, LATLNG ops, atmospheric model, ship info, control utilities
+    ├── telemetry.ks       # Logging and HUD: tlog, tdebug, plog, show_launch_hud, show_booster_hud
     ├── ascent.ks          # Gravity turn profile, staging detection
     ├── guidance.ks        # Trajectory prediction, impact calculation
     ├── circularize.ks     # Circularization burn
@@ -67,10 +73,9 @@ The main vessel kOS processor must have Name Tag `launch_vessel` (set this in th
 .\launch.ps1 -MainCPU 1 -BoosterCPUs 2,3
 ```
 
-`launch.ps1` does three things in order:
-1. Copies `autoland_staging.ks` to each booster processor as the boot file
-2. Runs `launch.ks` on the main vessel CPU
-3. Optionally streams `flight.log` to the console
+`launch.ps1` sends commands to the main vessel kOS CPU:
+1. Runs `test.ks` (if `-TestOnly`) or `launch.ks` (normal launch) — `launch.ks` internally handles all booster processor setup via `setup_booster_processors`
+2. Optionally streams `flight.log` to the console
 
 **From kOS terminal directly:**
 ```
@@ -113,7 +118,7 @@ at startup. If true, it skips the READY/DECOUPLE handshake and goes straight to
 landing. This handles both the FMRS rewind case and any unexpected processor restart
 mid-flight. Normal pad launches are unaffected (both conditions are false on the ground).
 
-Check `booster_N.log` for `"Airborne boot detected"` (FMRS path) vs
+Check `booster_booster_1.log` (and `booster_booster_2.log` etc.) for `"Airborne boot detected"` (FMRS path) vs
 `"Sent READY to launch_vessel"` (normal pad path).
 
 ## Keeping test.ks in Sync
@@ -156,13 +161,15 @@ The test suite runs on the launchpad without launching — there is no cost to m
 - `pitch = 90 * (1 - t^TURN_SHAPE)` where `t` is the fraction through the turn altitude range
 - `TURN_SHAPE < 1`: turns aggressively early (dangerous in thick lower atmosphere)
 - `TURN_SHAPE > 1`: stays near-vertical longer, turns later — correct for Kerbin
-- Current default: `1.5` (starts at 1500m, completes by 50km)
+- Current default: `2.5` (starts at 1500m, completes by 65km)
 
 ## Logging
 
-- `LOG_FILE` (declared in `util.ks`) controls where all output goes — default `0:/flight.log`
-- `log_message(msg)` — always prints to screen + file, prepends mission timestamp
+All logging functions live in `lib/telemetry.ks`. `LOG_FILE` and `DEBUG_MODE` are set in `config.ks`.
+
+- `tlog(msg)` — always prints to screen + file, prepends mission timestamp
 - `plog(msg)` — always prints to screen + file, no timestamp (used in test.ks)
-- `debug(msg)` — only prints/logs when `DEBUG_MODE IS TRUE`
+- `tdebug(msg)` — only prints/logs when `DEBUG_MODE IS TRUE`
 - `test.ks` redirects `LOG_FILE` to `0:/test_results.txt` and clears it on each run
 - `launch.ks` clears `flight.log` at the start of each mission
+- Each booster writes its own log: `booster_booster_1.log`, `booster_booster_2.log` etc.

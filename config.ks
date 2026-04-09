@@ -67,7 +67,7 @@ GLOBAL LANDING_OFFSET_SPACING IS 10. // East-west spacing between booster landin
 // =========================================================================
 
 GLOBAL SUICIDE_MARGIN IS 1.25.        // Safety factor on suicide burn altitude (1.0 = no margin)
-GLOBAL SUICIDE_ALT_TARGET IS 12.      // Target altitude to reach zero velocity (m)
+GLOBAL SUICIDE_ALT_TARGET IS 3.       // Target altitude to reach zero velocity (m)
                                       // Higher = safer soft-touchdown phase.
 GLOBAL LANDING_HEIGHT_OFFSET IS 15.   // Distance from root part to bottom of landing legs (m)
                                       // Crucial: Set this if the booster is tall!

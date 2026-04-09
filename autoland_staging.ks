@@ -226,7 +226,11 @@ FUNCTION phase_coast_entry {
 FUNCTION phase_descent {
     PARAMETER target_latlng.
     tlog("PHASE 5: Descent").
-    coast_to_landing_altitude(5000, target_latlng).
+    // Snapshot remaining fuel — coast corrections must not consume the landing reserve
+    LOCAL landing_fuel IS 0.
+    FOR res IN SHIP:RESOURCES { IF res:NAME = "LiquidFuel" { SET landing_fuel TO landing_fuel + res:AMOUNT. } }
+    tlog("Landing fuel reserve: " + ROUND(landing_fuel, 0) + " LF").
+    coast_to_landing_altitude(5000, target_latlng, landing_fuel).
 }
 
 FUNCTION phase_landing {

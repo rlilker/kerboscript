@@ -80,10 +80,12 @@ FUNCTION manage_descent {
 // =========================================================================
 
 // Coast through atmosphere maintaining retrograde with active corrections
+// min_fuel: if > 0, skip engine nudges when LF drops to or below this value (landing reserve guard)
 FUNCTION coast_to_landing_altitude {
-    PARAMETER landing_start_altitude IS 5000, target_latlng IS LATLNG(0, 0).
+    PARAMETER landing_start_altitude IS 5000, target_latlng IS LATLNG(0, 0), min_fuel IS 0.
 
     tlog("Coasting to landing altitude...").
+    IF min_fuel > 0 { tlog("Coast correction fuel guard: " + ROUND(min_fuel, 0) + " LF"). }
 
     // Enable RCS for stability and glide correction
     RCS ON.
@@ -97,7 +99,15 @@ FUNCTION coast_to_landing_altitude {
 
         // Active Trajectory Correction (Coast Nudge)
         // If error is high and we are high enough, use tiny engine throttle to move impact point.
-        IF distance_error > 500 AND SHIP:ALTITUDE > 5000 {
+        // Skip nudge if fuel is at or below landing reserve to protect the suicide burn.
+        LOCAL can_nudge IS TRUE.
+        IF min_fuel > 0 {
+            LOCAL cur_lf IS 0.
+            FOR res IN SHIP:RESOURCES { IF res:NAME = "LiquidFuel" { SET cur_lf TO cur_lf + res:AMOUNT. } }
+            IF cur_lf <= min_fuel { SET can_nudge TO FALSE. }
+        }
+
+        IF distance_error > 500 AND SHIP:ALTITUDE > 5000 AND can_nudge {
             LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.6).
             LOCK THROTTLE TO 0.05. // 5% nudge
         }
