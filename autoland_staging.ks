@@ -257,6 +257,11 @@ FUNCTION phase_post_landing {
     ELSE IF landing_error < 50  { tlog("Good landing (< 50m)"). }
     ELSE IF landing_error < 200 { tlog("Acceptable landing (< 200m)"). }
     ELSE { tlog("Rough landing (" + ROUND(landing_error, 0) + "m)"). }
+
+    // Shut down engines and zero KSP throttle before locks release on UNLOCK ALL.
+    // Mirrors launch.ks pattern — prevents physical throttle snap-back causing refire.
+    FOR eng IN SHIP:ENGINES { IF eng:IGNITION { eng:SHUTDOWN(). } }
+    SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
 }
 
 // =========================================================================

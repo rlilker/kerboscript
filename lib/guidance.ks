@@ -167,6 +167,32 @@ FUNCTION steer_retrograde_with_correction {
     RETURN blend_steering(retro_vec, correction_vec, blend_factor).
 }
 
+// Like steer_retrograde_with_correction but takes pre-computed impact data.
+// Use this inside loops that already own the prediction schedule — avoids
+// the expensive predict_current_impact call that the original makes internally.
+FUNCTION steer_retrograde_corrected {
+    PARAMETER predicted_impact, distance_error, target_latlng, correction_weight IS 0.5.
+
+    LOCAL retro_vec IS -SHIP:VELOCITY:SURFACE:NORMALIZED.
+
+    // RCS lateral nudge toward target
+    IF distance_error > (LANDING_TARGET_TOLERANCE * 2) AND SHIP:ALTITUDE > 500 {
+        LOCAL target_vec IS (BODY:GEOPOSITIONLATLNG(target_latlng:LAT, target_latlng:LNG):POSITION - SHIP:POSITION):NORMALIZED.
+        LOCAL local_target IS SHIP:FACING:INVERSE * target_vec.
+        SET SHIP:CONTROL:STARBOARD TO local_target:X * 0.5.
+        SET SHIP:CONTROL:TOP TO local_target:Y * 0.5.
+    } ELSE {
+        SET SHIP:CONTROL:NEUTRALIZE TO TRUE.
+    }
+
+    IF distance_error < LANDING_TARGET_TOLERANCE { RETURN retro_vec. }
+
+    LOCAL bearing IS bearing_to_target(predicted_impact, target_latlng).
+    LOCAL correction_vec IS heading_vector(bearing, 0).
+    LOCAL blend_factor IS MIN(1.0, distance_error / 2000) * correction_weight.
+    RETURN blend_steering(retro_vec, correction_vec, blend_factor).
+}
+
 // =========================================================================
 // ALTITUDE UTILITIES
 // =========================================================================

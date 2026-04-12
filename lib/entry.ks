@@ -79,64 +79,75 @@ FUNCTION manage_descent {
 // DESCENT PHASE CONTROL
 // =========================================================================
 
-// Coast through atmosphere maintaining retrograde with active corrections
-// min_fuel: if > 0, skip engine nudges when LF drops to or below this value (landing reserve guard)
+// Coast through atmosphere maintaining retrograde with active corrections.
+// Prediction is scheduled (not every tick) to avoid kOS CPU overload.
+// min_fuel: if > 0, skip engine nudges when LF at or below this (landing reserve guard).
 FUNCTION coast_to_landing_altitude {
     PARAMETER landing_start_altitude IS 5000, target_latlng IS LATLNG(0, 0), min_fuel IS 0.
 
     tlog("Coasting to landing altitude...").
-    IF min_fuel > 0 { tlog("Coast correction fuel guard: " + ROUND(min_fuel, 0) + " LF"). }
+    IF min_fuel > 0 { tlog("Landing fuel reserve: " + ROUND(min_fuel, 0) + " LF (coast nudge guarded)"). }
 
-    // Enable RCS for stability and glide correction
     RCS ON.
 
-    LOCAL last_update IS TIME:SECONDS.
+    LOCAL last_display    IS TIME:SECONDS.
+    LOCAL last_predict    IS TIME:SECONDS - 100.  // force immediate first prediction
+    LOCAL last_fuel_check IS TIME:SECONDS - 100.  // force immediate first check
+    LOCAL cached_impact   IS LATLNG(0, 0).
+    LOCAL distance_error  IS 9999.
+    LOCAL can_nudge       IS TRUE.
 
     UNTIL get_true_altitude() < landing_start_altitude {
-        // Continuous impact prediction
-        LOCAL predicted_impact IS predict_current_impact(400, 1.0).
-        LOCAL distance_error IS great_circle_distance(predicted_impact, target_latlng).
+        LOCAL ship_alt IS SHIP:ALTITUDE.
 
-        // Active Trajectory Correction (Coast Nudge)
-        // If error is high and we are high enough, use tiny engine throttle to move impact point.
-        // Skip nudge if fuel is at or below landing reserve to protect the suicide burn.
-        LOCAL can_nudge IS TRUE.
-        IF min_fuel > 0 {
+        // Prediction on a schedule: 30s above 30 km, 5s below
+        LOCAL predict_interval IS 30.
+        IF ship_alt < 30000 { SET predict_interval TO 5. }
+
+        IF TIME:SECONDS - last_predict > predict_interval {
+            SET cached_impact  TO predict_current_impact(400, 1.0).
+            SET distance_error TO great_circle_distance(cached_impact, target_latlng).
+            SET last_predict   TO TIME:SECONDS.
+        }
+
+        // Fuel guard: re-read resources every 30 s (fuel changes slowly during coast)
+        IF min_fuel > 0 AND TIME:SECONDS - last_fuel_check > 30 {
             LOCAL cur_lf IS 0.
-            FOR res IN SHIP:RESOURCES { IF res:NAME = "LiquidFuel" { SET cur_lf TO cur_lf + res:AMOUNT. } }
-            IF cur_lf <= min_fuel { SET can_nudge TO FALSE. }
-        }
-
-        IF distance_error > 500 AND SHIP:ALTITUDE > 5000 AND can_nudge {
-            LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.6).
-            LOCK THROTTLE TO 0.05. // 5% nudge
-        }
-        ELSE {
-            LOCK THROTTLE TO 0.
-            LOCK STEERING TO steer_retrograde_with_correction(target_latlng, 0.3).
-        }
-
-        // Deploy airbrakes if in atmosphere
-        IF SHIP:ALTITUDE < 40000 AND SHIP:ALTITUDE > 1000 {
-            IF NOT BRAKES {
-                deploy_airbrakes().
+            FOR res IN SHIP:RESOURCES {
+                IF res:NAME = "LiquidFuel" { SET cur_lf TO cur_lf + res:AMOUNT. }
             }
+            SET can_nudge       TO cur_lf > min_fuel.
+            SET last_fuel_check TO TIME:SECONDS.
         }
 
-        // Update telemetry every second
-        IF TIME:SECONDS - last_update > 1.0 {
-            LOCAL airbrake_status IS "".
+        // Throttle: engine nudge only when off-course, high enough, and fuel allows
+        IF distance_error > 500 AND ship_alt > 5000 AND can_nudge {
+            LOCK THROTTLE TO 0.05.
+        } ELSE {
+            LOCK THROTTLE TO 0.
+        }
+
+        // Steering: uses cached prediction — no redundant predict_current_impact call
+        LOCK STEERING TO steer_retrograde_corrected(cached_impact, distance_error, target_latlng, 0.4).
+
+        // Airbrakes
+        IF ship_alt < 40000 AND ship_alt > 1000 {
+            IF NOT BRAKES { deploy_airbrakes(). }
+        }
+
+        // Telemetry once per second
+        IF TIME:SECONDS - last_display > 1.0 {
+            LOCAL airbrake_status IS "Airbrakes: retracted".
             IF BRAKES { SET airbrake_status TO "Airbrakes: DEPLOYED". }
-            ELSE { SET airbrake_status TO "Airbrakes: retracted". }
-            
             LOCAL nudge_status IS "Glide".
             IF THROTTLE > 0 { SET nudge_status TO "Nudge". }
-            
             show_booster_hud(nudge_status + " (Err: " + ROUND(distance_error, 0) + "m)", airbrake_status).
-            SET last_update TO TIME:SECONDS.
+            SET last_display TO TIME:SECONDS.
         }
 
-        WAIT 0.1.
+        // Tick rate: slower at high altitude where nothing changes fast
+        IF ship_alt > 30000 { WAIT 0.5. }
+        ELSE { WAIT 0.1. }
     }
 
     LOCK THROTTLE TO 0.
