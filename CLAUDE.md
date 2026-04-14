@@ -152,6 +152,20 @@ The test suite runs on the launchpad without launching — there is no cost to m
 - `is_booster_stage(stg)` checks if a staging group contains parts tagged "booster_*" — only these groups get threshold-based early staging; all others stage when empty (0%).
 - Boosters must stage with fuel remaining (default threshold: 20%) so they have delta-v for boostback and landing
 
+**Reserved variable names:**
+- `alt` is a kOS built-in structure (`ALT:RADAR`, `ALT:APOAPSIS` etc.) — declaring `LOCAL alt IS ...` causes `Not allowed to SET a name that will clobber BUILTIN_READ_ONLY_VARIABLE`. Use `ship_alt`, `cur_alt`, etc.
+- Other known built-ins to avoid as local names: `time`, `ship`, `body`, `stage`, `rcs`, `sas`, `gear`, `brakes`, `throttle`, `steering`
+
+**Touchdown detection:**
+- `SHIP:GROUNDCONTACT` does **not** work — throws `groundcontact suffix not found on VesselTarget`. Use `SHIP:STATUS = "LANDED" OR SHIP:STATUS = "SPLASHED"` instead.
+
+**Tight loop performance:**
+- Calling `predict_current_impact(400, 1.0)` every tick (0.1s) = 4,000 integration steps/sec and will crash kOS reliably. Any expensive function called from a WAIT loop must be rate-limited with a timer (e.g. every 5–30s).
+- `steer_retrograde_with_correction()` in `guidance.ks` calls `predict_current_impact` internally — do not call it every tick either. Use `steer_retrograde_corrected()` instead, which takes pre-computed impact data.
+
+**Control handoff:**
+- Before `UNLOCK ALL` or `UNLOCK THROTTLE`, set `SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.` first. Otherwise the physical throttle slider snaps back and engines refire. See `launch.ks` lines 334–337 for the pattern.
+
 **Atmosphere:**
 - Use `BODY:ATM:HEIGHT` instead of hardcoding `70000` — works correctly for any body
 - **No non-ASCII in string literals** — em dashes, smart quotes, etc. cause `Unexpected token` parse errors. Comments are fine; strings must be plain ASCII.
@@ -162,6 +176,15 @@ The test suite runs on the launchpad without launching — there is no cost to m
 - `TURN_SHAPE < 1`: turns aggressively early (dangerous in thick lower atmosphere)
 - `TURN_SHAPE > 1`: stays near-vertical longer, turns later — correct for Kerbin
 - Current default: `2.5` (starts at 1500m, completes by 65km)
+
+## Landing Tuning
+
+Key parameters in `config.ks`:
+- `SUICIDE_ALT_TARGET` (default: 3m) — altitude where the proportional hover controller targets zero velocity. Too high = long hover burn. Trigger for fine control is `SUICIDE_ALT_TARGET + 2`.
+- `LANDING_HEIGHT_OFFSET` (default: 15m) — radar altimeter offset for leg geometry. Increase if the rocket settles before legs touch; decrease if it cuts engines mid-air.
+- `TOUCHDOWN_SPEED` (default: 1.5 m/s) — target vertical speed during the last few metres.
+
+**Coast correction design:** `coast_to_landing_altitude()` in `entry.ks` schedules `predict_current_impact()` every 5–30s (altitude-adaptive) and caches the result. Steering calls `steer_retrograde_corrected()` with the cached values — never re-runs prediction per tick. The engine nudge (5% throttle) is guarded by a fuel threshold: corrections are blocked when `LiquidFuel < 30% of initial fuel` (the same reserve the boostback burn protects). The guard is computed pre-burn in `autoland_staging.ks` and passed down.
 
 ## Logging
 
