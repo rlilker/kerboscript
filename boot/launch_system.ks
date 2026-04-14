@@ -20,7 +20,7 @@ IF EXISTS("test.ks") {
         PRINT " ".
         PRINT "!!! PRE-FLIGHT TESTS FAILED !!!".
         PRINT "Launch aborted. Check test_results.txt".
-        TERMINATE.
+        SHUTDOWN.
     }
 }
 

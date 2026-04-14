@@ -157,12 +157,11 @@ plog(" ").
 plog("Test 4: Staging & fuel...").
 plog("  STAGE:NUMBER = " + STAGE:NUMBER).
 
-// Show part count — this is what booster scripts use for separation detection.
-// autoland_staging.ks records SHIP:PARTS:LENGTH at boot and waits until it
-// drops below 50% to detect separation.
+// Show part count — informational only.
+// Separation detection in autoland_staging.ks uses "launch_vessel" tag presence,
+// not a parts-count threshold.
 LOCAL total_parts IS SHIP:PARTS:LENGTH.
 plog("  Total parts: " + total_parts).
-plog("  Separation threshold: < " + ROUND(total_parts * 0.5, 0) + " parts (50%)").
 
 // Count kOS processors — should match expected number of recoverable boosters
 LOCAL kos_count IS 0.
@@ -205,6 +204,19 @@ IF next_stg >= 0 {
 } ELSE {
     plog("    ⚠ No staging group detected — staging will not fire").
 }
+
+// Dump each booster kOS processor's DECOUPLEDIN — perform_staging() matches
+// this value against STAGE:NUMBER to decide which boosters separate at each event.
+// All three should print distinct values; boosters sharing a stage get the same value.
+plog("  Booster processor DECOUPLEDIN values (must match STAGE:NUMBER at separation):").
+LOCAL found_booster_procs IS FALSE.
+FOR part IN SHIP:PARTS {
+    IF part:HASMODULE("kOSProcessor") AND part:TAG:STARTSWITH("booster") {
+        plog("    " + part:TAG + ": DECOUPLEDIN=" + part:DECOUPLEDIN).
+        SET found_booster_procs TO TRUE.
+    }
+}
+IF NOT found_booster_procs { plog("    (none found)"). }
 
 plog(" ").
 

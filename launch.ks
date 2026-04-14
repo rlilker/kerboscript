@@ -132,22 +132,47 @@ FUNCTION setup_booster_processors {
 // =========================================================================
 
 FUNCTION perform_staging {
+    LOCAL current_stage IS STAGE:NUMBER.
     LOCAL next_stg IS get_next_booster_stage().
     LOCAL fuel_log IS "unknown".
     IF next_stg >= 0 { SET fuel_log TO ROUND(get_stage_fuel_percent(next_stg), 1) + "%". }
     tlog("Staging initiated - booster fuel at " + fuel_log +
-                " (DECOUPLEDIN=" + next_stg + ", STAGE:NUMBER=" + STAGE:NUMBER + ")").
+                " (DECOUPLEDIN=" + next_stg + ", STAGE:NUMBER=" + current_stage + ")").
 
-    // Signal each booster to decouple, then clear the list so subsequent staging
-    // events don't try to re-send to already-separated (out of range) processors.
+    // Signal only the boosters that are actually separating at this stage event.
+    // Boosters at a different DECOUPLEDIN (e.g. booster_3 decoupling later) stay
+    // in BOOSTER_PROCS to receive their DECOUPLE message when their stage fires.
     IF ENABLE_BOOSTER_RECOVERY AND BOOSTER_PROCS:LENGTH > 0 {
+        LOCAL separating IS LIST().
+        LOCAL staying IS LIST().
         FOR tag IN BOOSTER_PROCS {
-            PROCESSOR(tag):CONNECTION:SENDMESSAGE("DECOUPLE").
+            LOCAL b_dcpl IS -1.
+            FOR part IN SHIP:PARTS {
+                IF part:TAG = tag AND part:HASMODULE("kOSProcessor") {
+                    IF part:DECOUPLEDIN > b_dcpl { SET b_dcpl TO part:DECOUPLEDIN. }
+                }
+            }
+            IF b_dcpl = current_stage {
+                separating:ADD(tag).
+            } ELSE {
+                staying:ADD(tag).
+            }
         }
-        SET BOOSTER_COUNT TO BOOSTER_COUNT + BOOSTER_PROCS:LENGTH.
-        tlog("DECOUPLE sent to " + BOOSTER_PROCS:LENGTH + " booster(s)").
-        BOOSTER_PROCS:CLEAR().
-        WAIT 0.3.  // Brief pause to let boosters cut throttle before decoupler fires
+
+        IF separating:LENGTH > 0 {
+            FOR tag IN separating {
+                PROCESSOR(tag):CONNECTION:SENDMESSAGE("DECOUPLE").
+            }
+            SET BOOSTER_COUNT TO BOOSTER_COUNT + separating:LENGTH.
+            tlog("DECOUPLE sent to " + separating:LENGTH + " booster(s) at stage " + current_stage).
+            BOOSTER_PROCS:CLEAR().
+            FOR tag IN staying {
+                BOOSTER_PROCS:ADD(tag).
+            }
+            WAIT 0.3.  // Brief pause to let boosters cut throttle before decoupler fires
+        } ELSE {
+            tlog("No booster DECOUPLEDIN matched stage " + current_stage + " -- no DECOUPLE sent").
+        }
     }
 
     // Fire the decoupler

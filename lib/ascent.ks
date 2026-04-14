@@ -235,7 +235,11 @@ FUNCTION get_next_booster_stage {
 }
 
 // Get the total fuel percentage of the booster tanks that are due to be decoupled.
-// Identifies the highest stage S containing a booster CPU, then monitors fuel in S-1.
+// Identifies the highest DECOUPLEDIN stage S among booster-tagged parts, then checks
+// fuel capacity at both S and S-1, monitoring whichever holds more fuel. This handles
+// two booster configurations automatically:
+//   - kOS co-located with tanks (same DECOUPLEDIN, e.g. booster_3): primary fuel is at S
+//   - kOS adapter one stage above tanks (e.g. boosters 1+2): primary fuel is at S-1
 FUNCTION get_booster_assembly_fuel {
     LOCAL max_b_stg IS -1.
     FOR part IN SHIP:PARTS {
@@ -245,29 +249,33 @@ FUNCTION get_booster_assembly_fuel {
             }
         }
     }
-    
-    // If no boosters found, return -1
+
     IF max_b_stg = -1 { RETURN -1. }
-    
-    // Monitor fuel ONLY in the stage that will actually be decoupled (S-1)
-    LOCAL monitor_stg IS max_b_stg.
-    IF max_b_stg > 0 { SET monitor_stg TO max_b_stg - 1. }
-    
-    LOCAL fuel IS 0.
-    LOCAL cap IS 0.
+
+    // Measure LiquidFuel at S and S-1, pick the stage with greater capacity.
+    LOCAL fuel_s IS 0.   LOCAL cap_s IS 0.
+    LOCAL fuel_sm IS 0.  LOCAL cap_sm IS 0.
     FOR part IN SHIP:PARTS {
-        IF part:DECOUPLEDIN = monitor_stg {
-            FOR res IN part:RESOURCES {
-                IF res:NAME = "LiquidFuel" {
-                    SET fuel TO fuel + res:AMOUNT.
-                    SET cap TO cap + res:CAPACITY.
+        FOR res IN part:RESOURCES {
+            IF res:NAME = "LiquidFuel" {
+                IF part:DECOUPLEDIN = max_b_stg {
+                    SET fuel_s TO fuel_s + res:AMOUNT.
+                    SET cap_s  TO cap_s  + res:CAPACITY.
+                }
+                IF part:DECOUPLEDIN = max_b_stg - 1 {
+                    SET fuel_sm TO fuel_sm + res:AMOUNT.
+                    SET cap_sm  TO cap_sm  + res:CAPACITY.
                 }
             }
         }
     }
-    
-    IF cap > 0 { RETURN (fuel / cap) * 100. }
-    RETURN 100. // Return 100 if monitored stage has no fuel tanks
+
+    IF cap_s >= cap_sm {
+        IF cap_s > 0 { RETURN (fuel_s / cap_s) * 100. }
+    } ELSE {
+        IF cap_sm > 0 { RETURN (fuel_sm / cap_sm) * 100. }
+    }
+    RETURN 100.
 }
 
 // Log the fuel levels and booster status of all upcoming stages.

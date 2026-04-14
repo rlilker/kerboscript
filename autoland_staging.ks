@@ -51,9 +51,16 @@ IF already_separated {
     // Standby display — wait for DECOUPLE from main vessel
     UNTIL NOT CORE:MESSAGES:EMPTY {
         show_standby_hud().
-        // Fallback: if physically separated without receiving DECOUPLE message
-        IF SHIP:PARTS:LENGTH < init_parts * 0.5 {
-            tlog("Separation detected via parts count (no message received)").
+        // Fallback: detect physical separation by checking whether the main vessel
+        // processor is still part of our ship. Parts-count check was replaced because
+        // it falsely triggered when other boosters decoupled earlier in flight,
+        // causing a still-attached booster to exit standby prematurely.
+        LOCAL main_present IS FALSE.
+        FOR p IN SHIP:PARTS {
+            IF p:TAG = "launch_vessel" { SET main_present TO TRUE. BREAK. }
+        }
+        IF NOT main_present {
+            tlog("Separation detected: launch_vessel no longer in vessel").
             BREAK.
         }
         WAIT 0.5.
