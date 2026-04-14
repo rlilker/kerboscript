@@ -193,7 +193,7 @@ FUNCTION phase_gravity_turn {
     LOCAL launch_heading IS get_launch_azimuth(TARGET_INCLINATION).
     LOCAL last_log_time IS TIME:SECONDS.
 
-    UNTIL SHIP:APOAPSIS >= TARGET_APOAPSIS OR SHIP:ALTITUDE > BODY:ATM:HEIGHT {
+    UNTIL SHIP:APOAPSIS >= TARGET_APOAPSIS {
         // Calculate target pitch
         LOCAL target_pitch IS get_target_pitch(
             SHIP:ALTITUDE,
