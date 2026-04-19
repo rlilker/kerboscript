@@ -14,6 +14,12 @@ RUNONCEPATH("0:/lib/util.ks").
 
 GLOBAL LAST_STAGE_TIME IS 0.
 
+// Key: booster processor DECOUPLEDIN (= separation stage).
+// Value: LEXICON("fuel_parts" -> LIST of live part refs with LF,
+//                "dry_kg" -> kg, "lf_cap" -> LF units, "isp" -> s).
+// Populated once at setup by build_booster_assemblies().
+GLOBAL BOOSTER_ASSEMBLIES IS LEXICON().
+
 // =========================================================================
 // GRAVITY TURN PROFILE
 // =========================================================================
@@ -234,48 +240,30 @@ FUNCTION get_next_booster_stage {
     RETURN get_next_fuel_stage().
 }
 
-// Get the total fuel percentage of the booster tanks that are due to be decoupled.
-// Identifies the highest DECOUPLEDIN stage S among booster-tagged parts, then checks
-// fuel capacity at both S and S-1, monitoring whichever holds more fuel. This handles
-// two booster configurations automatically:
-//   - kOS co-located with tanks (same DECOUPLEDIN, e.g. booster_3): primary fuel is at S
-//   - kOS adapter one stage above tanks (e.g. boosters 1+2): primary fuel is at S-1
-FUNCTION get_booster_assembly_fuel {
-    LOCAL max_b_stg IS -1.
-    FOR part IN SHIP:PARTS {
-        IF part:TAG:STARTSWITH("booster") {
-            IF part:DECOUPLEDIN > max_b_stg AND part:DECOUPLEDIN <= STAGE:NUMBER {
-                SET max_b_stg TO part:DECOUPLEDIN.
-            }
-        }
-    }
-
-    IF max_b_stg = -1 { RETURN -1. }
-
-    // Measure LiquidFuel at S and S-1, pick the stage with greater capacity.
-    LOCAL fuel_s IS 0.   LOCAL cap_s IS 0.
-    LOCAL fuel_sm IS 0.  LOCAL cap_sm IS 0.
-    FOR part IN SHIP:PARTS {
+// Return current LF% for a booster assembly by iterating pre-cached part refs.
+// No SHIP:PARTS scan — just reads live resources from the stored part objects.
+FUNCTION get_booster_fuel_pct {
+    PARAMETER d_proc.
+    IF NOT BOOSTER_ASSEMBLIES:HASKEY(d_proc) { RETURN -1. }
+    LOCAL fuel IS 0.  LOCAL cap IS 0.
+    FOR part IN BOOSTER_ASSEMBLIES[d_proc]["fuel_parts"] {
         FOR res IN part:RESOURCES {
             IF res:NAME = "LiquidFuel" {
-                IF part:DECOUPLEDIN = max_b_stg {
-                    SET fuel_s TO fuel_s + res:AMOUNT.
-                    SET cap_s  TO cap_s  + res:CAPACITY.
-                }
-                IF part:DECOUPLEDIN = max_b_stg - 1 {
-                    SET fuel_sm TO fuel_sm + res:AMOUNT.
-                    SET cap_sm  TO cap_sm  + res:CAPACITY.
-                }
+                SET fuel TO fuel + res:AMOUNT.
+                SET cap  TO cap  + res:CAPACITY.
             }
         }
     }
-
-    IF cap_s >= cap_sm {
-        IF cap_s > 0 { RETURN (fuel_s / cap_s) * 100. }
-    } ELSE {
-        IF cap_sm > 0 { RETURN (fuel_sm / cap_sm) * 100. }
-    }
+    IF cap > 0 { RETURN fuel / cap * 100. }
     RETURN 100.
+}
+
+// Get the fuel percentage of the booster assembly that is about to decouple.
+// Delegates to get_booster_fuel_pct() using the highest active booster stage.
+FUNCTION get_booster_assembly_fuel {
+    LOCAL d IS get_max_booster_decoupledin().
+    IF d <= 0 { RETURN -1. }
+    RETURN get_booster_fuel_pct(d).
 }
 
 // Log the fuel levels and booster status of all upcoming stages.
@@ -318,9 +306,174 @@ FUNCTION log_staging_status {
     tdebug("--------------------------------").
 }
 
+// Build BOOSTER_ASSEMBLIES: for each booster group, cache live fuel-part refs,
+// dry mass, LF capacity, and engine Isp. Call once from setup_booster_processors()
+// before launch.
+//
+// Engine detection searches DECOUPLEDIN in {d, d-1, d+1}, processing booster
+// groups from highest DECOUPLEDIN (earliest-separating) to lowest so that
+// earlier-separating groups claim their engine stage before later ones try d+1.
+FUNCTION build_booster_assemblies {
+    SET BOOSTER_ASSEMBLIES TO LEXICON().
+
+    LOCAL proc_dcpls IS LIST().
+    FOR part IN SHIP:PARTS {
+        IF part:HASMODULE("kOSProcessor") AND part:TAG:STARTSWITH("booster") {
+            IF NOT proc_dcpls:CONTAINS(part:DECOUPLEDIN) {
+                proc_dcpls:ADD(part:DECOUPLEDIN).
+            }
+        }
+    }
+
+    LOCAL remaining IS proc_dcpls:COPY.
+    LOCAL claimed_eng_dcpls IS LIST().
+
+    UNTIL remaining:EMPTY {
+        LOCAL max_d IS remaining[0].  LOCAL max_i IS 0.
+        LOCAL i IS 1.
+        UNTIL i >= remaining:LENGTH {
+            IF remaining[i] > max_d { SET max_d TO remaining[i].  SET max_i TO i. }
+            SET i TO i + 1.
+        }
+        remaining:REMOVE(max_i).
+        LOCAL d IS max_d.
+
+        // Find engine DECOUPLEDIN: prefer d, then d-1, then d+1; skip claimed stages.
+        LOCAL eng_dcpl IS -1.
+        LOCAL cand_list IS LIST(d, d - 1, d + 1).
+        FOR cand IN cand_list {
+            IF eng_dcpl = -1 AND NOT claimed_eng_dcpls:CONTAINS(cand) AND cand >= 0 {
+                FOR eng IN SHIP:ENGINES {
+                    IF eng:DECOUPLEDIN = cand { SET eng_dcpl TO cand.  BREAK. }
+                }
+            }
+        }
+        IF eng_dcpl >= 0 { claimed_eng_dcpls:ADD(eng_dcpl). }
+
+        // fuel_low / fuel_high define the DECOUPLEDIN range for fuel monitoring.
+        // When eng_dcpl < d (kOS adapter is one stage above the tanks/engines):
+        //   - fuel_low = fuel_high = eng_dcpl  →  only parts at the engine stage count
+        //     toward lf_cap / fuel_parts (those are the tanks the engines actually drain).
+        //     Adapter parts at d carry physical mass but their fuel doesn't drain, so
+        //     including them would dilute the fuel% and delay staging.
+        //   - dry_kg still scans [eng_dcpl, d] to include the adapter's structural mass.
+        // When eng_dcpl = d (co-located) or no engines found: scan [d, d].
+        LOCAL fuel_low IS d.
+        LOCAL fuel_high IS d.
+        IF eng_dcpl >= 0 AND eng_dcpl < d {
+            SET fuel_low  TO eng_dcpl.
+            SET fuel_high TO eng_dcpl.
+        }
+
+        LOCAL fuel_parts IS LIST().
+        LOCAL lf_cap IS 0.
+        LOCAL dry_kg IS 0.
+        FOR part IN SHIP:PARTS {
+            IF part:DECOUPLEDIN >= fuel_low AND part:DECOUPLEDIN <= d {
+                SET dry_kg TO dry_kg + part:DRYMASS * 1000.
+            }
+            IF part:DECOUPLEDIN >= fuel_low AND part:DECOUPLEDIN <= fuel_high {
+                LOCAL has_lf IS FALSE.
+                FOR res IN part:RESOURCES {
+                    IF res:NAME = "LiquidFuel" {
+                        SET lf_cap TO lf_cap + res:CAPACITY.
+                        SET has_lf TO TRUE.
+                    }
+                }
+                IF has_lf { fuel_parts:ADD(part). }
+            }
+        }
+        // If engines are above the processor stage (eng_dcpl > d, unusual staging quirk),
+        // include their dry mass so the rocket equation sees the full booster mass.
+        IF eng_dcpl > d {
+            FOR part IN SHIP:PARTS {
+                IF part:DECOUPLEDIN = eng_dcpl {
+                    SET dry_kg TO dry_kg + part:DRYMASS * 1000.
+                }
+            }
+        }
+
+        // Apply per-stage dry-mass override from config if set.
+        IF BOOSTER_DRY_MASS_OVERRIDES:HASKEY(d) AND BOOSTER_DRY_MASS_OVERRIDES[d] > 0 {
+            SET dry_kg TO BOOSTER_DRY_MASS_OVERRIDES[d].
+        }
+
+        // ISP from engines at eng_dcpl — use ISPAT(0) for vacuum ISP (works when engines are off).
+        LOCAL eng_count IS 0.  LOCAL isp_sum IS 0.
+        IF eng_dcpl >= 0 {
+            FOR eng IN SHIP:ENGINES {
+                IF eng:DECOUPLEDIN = eng_dcpl {
+                    LOCAL part_isp IS eng:ISPAT(0).
+                    IF part_isp <= 0 { SET part_isp TO BOOSTER_VACUUM_ISP. }
+                    SET eng_count TO eng_count + 1.
+                    SET isp_sum   TO isp_sum + part_isp.
+                }
+            }
+        }
+        LOCAL isp IS BOOSTER_VACUUM_ISP.
+        IF eng_count > 0 { SET isp TO isp_sum / eng_count. }
+
+        BOOSTER_ASSEMBLIES:ADD(d, LEXICON(
+            "fuel_parts", fuel_parts,
+            "dry_kg",     dry_kg,
+            "lf_cap",     lf_cap,
+            "isp",        isp
+        )).
+        tlog("  Assembly stg " + d + " (eng_dcpl=" + eng_dcpl + "): " +
+             "dry=" + ROUND(dry_kg/1000, 2) + "t  " +
+             "Isp=" + ROUND(isp, 0) + "s  " +
+             "LF_cap=" + ROUND(lf_cap, 0) + "  " +
+             "fuel_parts=" + fuel_parts:LENGTH).
+    }
+}
+
+// Compute the minimum LF% to retain in a booster stage so it has enough delta-v
+// for landing. Uses the rocket equation with cached dry mass and engine Isp.
+// dv_needed = SHIP:VELOCITY:SURFACE:MAG * BOOSTBACK_DV_FRACTION + LANDING_DV_FIXED
+FUNCTION get_booster_dv_threshold_pct {
+    PARAMETER booster_dcpl.
+    IF NOT BOOSTER_ASSEMBLIES:HASKEY(booster_dcpl) { RETURN 20. }
+    LOCAL c IS BOOSTER_ASSEMBLIES[booster_dcpl].
+    LOCAL dry_kg IS c["dry_kg"].
+    LOCAL isp    IS c["isp"].
+    LOCAL lf_cap IS c["lf_cap"].
+    IF dry_kg = 0 OR isp = 0 OR lf_cap = 0 { RETURN 20. }
+    LOCAL alt_frac IS MIN(1.0, SHIP:ALTITUDE / BODY:ATM:HEIGHT).
+    LOCAL bb_frac IS BOOSTBACK_DV_FRACTION + BOOSTBACK_DV_ALT_FACTOR * alt_frac.
+    LOCAL dv_needed IS SHIP:VELOCITY:SURFACE:MAG * bb_frac + LANDING_DV_FIXED.
+    RETURN calc_dv_threshold_pct(dry_kg, isp, lf_cap, dv_needed).
+}
+
+// Same calculation but accepts explicit dv and altitude values.
+// Used by test.ks to print thresholds at reference conditions without live data.
+FUNCTION get_booster_dv_threshold_pct_at {
+    PARAMETER booster_dcpl, vel_ref, alt_ref.
+    IF NOT BOOSTER_ASSEMBLIES:HASKEY(booster_dcpl) { RETURN 20. }
+    LOCAL c IS BOOSTER_ASSEMBLIES[booster_dcpl].
+    LOCAL dry_kg IS c["dry_kg"].
+    LOCAL isp    IS c["isp"].
+    LOCAL lf_cap IS c["lf_cap"].
+    IF dry_kg = 0 OR isp = 0 OR lf_cap = 0 { RETURN 20. }
+    LOCAL alt_frac IS MIN(1.0, alt_ref / BODY:ATM:HEIGHT).
+    LOCAL bb_frac IS BOOSTBACK_DV_FRACTION + BOOSTBACK_DV_ALT_FACTOR * alt_frac.
+    LOCAL dv_needed IS vel_ref * bb_frac + LANDING_DV_FIXED.
+    RETURN calc_dv_threshold_pct(dry_kg, isp, lf_cap, dv_needed).
+}
+
+// Rocket equation core: given cached booster params and a delta-v budget,
+// returns the minimum LF percentage that covers that budget.
+// LF+OX mix 0.9:1.1 by volume, equal density (5 kg/unit) -> LF is 45% of prop mass.
+FUNCTION calc_dv_threshold_pct {
+    PARAMETER dry_kg, isp, lf_cap, dv_needed.
+    LOCAL ve IS isp * 9.80665.
+    LOCAL m_prop_kg IS dry_kg * (CONSTANT:E ^ (dv_needed / ve) - 1).
+    LOCAL lf_units_needed IS m_prop_kg * 0.45 / 5.
+    LOCAL pct IS (lf_units_needed / lf_cap) * 100.
+    RETURN MIN(90, MAX(5, pct)).
+}
+
 // Check if staging is needed.
 FUNCTION check_staging_needed {
-    PARAMETER fuel_threshold.
 
     LOCAL now IS TIME:SECONDS.
     LOCAL time_since_stg IS now - LAST_STAGE_TIME.
@@ -344,13 +497,19 @@ FUNCTION check_staging_needed {
         }
     }
 
-    // 4. Booster Assembly Threshold
-    // If the next boosters-to-decouple drop below threshold, stage.
+    // 4. Booster Assembly Threshold — dynamic threshold from rocket equation.
+    // Threshold = fuel% needed to cover (velocity * BOOSTBACK_DV_FRACTION + LANDING_DV_FIXED).
+    // Uses cached dry mass and Isp, so the only live cost is one velocity read + arithmetic.
     LOCAL b_fuel IS get_booster_assembly_fuel().
-    IF b_fuel >= 0 AND b_fuel < fuel_threshold {
-        tlog("Staging: Booster assembly at " + ROUND(b_fuel, 1) + "%").
-        SET LAST_STAGE_TIME TO now.
-        RETURN TRUE.
+    IF b_fuel >= 0 {
+        LOCAL b_dcpl IS get_max_booster_decoupledin().
+        LOCAL dv_threshold IS get_booster_dv_threshold_pct(b_dcpl).
+        IF b_fuel < dv_threshold {
+            tlog("Staging: Booster assembly at " + ROUND(b_fuel, 1) +
+                 "% (threshold " + ROUND(dv_threshold, 1) + "%)").
+            SET LAST_STAGE_TIME TO now.
+            RETURN TRUE.
+        }
     }
 
     // 5. Dead-Engine Recovery (e.g. activation stage with no engines)

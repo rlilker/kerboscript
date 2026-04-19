@@ -47,12 +47,32 @@ GLOBAL ASCENT_ETA_APOAPSIS_TARGET IS 50. // Target time-to-apoapsis during ascen
 // STAGING
 // =========================================================================
 
-GLOBAL STAGE_FUEL_THRESHOLD IS 20.   // Stage when booster liquid fuel drops below this % —
-                                      // must be high enough to leave fuel for landing burns
-GLOBAL STAGING_MIN_INTERVAL IS 1.5.  // Minimum time between stage activations (s)
-                                      // Prevents runaway staging chain reactions.
+GLOBAL BOOSTBACK_DV_FRACTION IS 0.55. // Base fraction of surface velocity budgeted for boostback
+                                       // (applies at low altitude / ground level).
+GLOBAL BOOSTBACK_DV_ALT_FACTOR IS 0.80. // Additional fraction added per atmosphere-height of altitude.
+                                          // Effective fraction = BOOSTBACK_DV_FRACTION + ALT_FACTOR * (alt / atm_height).
+                                          // At atm top: 0.55 + 0.80 = 1.35 — ensures late-separating
+                                          // inline boosters retain enough dV for full velocity cancellation.
+GLOBAL LANDING_DV_FIXED IS 1200.      // Fixed m/s budget for entry burn + suicide burn.
+                                       // Added to the velocity-scaled boostback estimate.
+GLOBAL BOOSTER_VACUUM_ISP IS 320.     // Vacuum Isp of booster engines (s).
+                                       // Used by the staging threshold calculator.
+                                       // Run test.ks and check the engine field dump to verify.
+GLOBAL LANDING_RESERVE_FRACTION IS 0.35. // Fraction of separation fuel reserved for landing.
+                                          // Applied once at separation; passed to boostback and
+                                          // descent so both use the same floor. Raise if booster
+                                          // runs dry during landing; lower if boostback falls short.
+GLOBAL STAGING_MIN_INTERVAL IS 1.5.   // Minimum time between stage activations (s)
+                                       // Prevents runaway staging chain reactions.
 
 GLOBAL ENABLE_BOOSTER_RECOVERY IS TRUE.
+
+// Dry-mass override table: keyed by booster separation stage (DECOUPLEDIN of its kOS processor).
+// Use when auto-detection gives the wrong dry_kg (e.g. engines share a DECOUPLEDIN with
+// another booster group). Value is total booster dry mass in kg (tanks + engines + structure).
+// Example: GLOBAL BOOSTER_DRY_MASS_OVERRIDES IS LEXICON(3, 17000).
+// Set to an empty lexicon to let auto-detection run for all boosters.
+GLOBAL BOOSTER_DRY_MASS_OVERRIDES IS LEXICON().
 
 // =========================================================================
 // LANDING ZONE

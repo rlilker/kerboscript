@@ -197,10 +197,10 @@ FUNCTION phase_flip {
 }
 
 FUNCTION phase_boostback {
-    PARAMETER target_latlng.
+    PARAMETER target_latlng, landing_reserve.
     tlog("PHASE 3: Boostback Burn").
     IF assess_boostback_needed(target_latlng, 2000) {
-        RETURN execute_boostback(target_latlng, BOOSTBACK_MAX_BURN_TIME, BOOSTBACK_TARGET_ERROR).
+        RETURN execute_boostback(target_latlng, BOOSTBACK_MAX_BURN_TIME, BOOSTBACK_TARGET_ERROR, landing_reserve).
     }
     tlog("Skipping boostback - already on trajectory").
     RETURN TRUE.
@@ -280,16 +280,16 @@ ON ABORT {
 
 LOCAL target_latlng IS initialize_landing_system().
 
-// Record fuel before any burns — 30% reserve matches the boostback cutoff threshold.
-// This is the correct guard for coast corrections: allow nudges above reserve, not above current fuel.
+// Compute landing reserve once at separation. Used as the fuel floor for both the
+// boostback burn and the coast/descent nudge guard — a single source of truth.
 LOCAL init_lf IS 0.
 FOR res IN SHIP:RESOURCES { IF res:NAME = "LiquidFuel" { SET init_lf TO init_lf + res:AMOUNT. } }
-LOCAL booster_landing_reserve IS init_lf * 0.30.
+LOCAL booster_landing_reserve IS init_lf * LANDING_RESERVE_FRACTION.
 tlog("Initial LF: " + ROUND(init_lf, 0) + "  Landing reserve: " + ROUND(booster_landing_reserve, 0) + " LF").
 
 phase_separation_coast(target_latlng).
 phase_flip().
-phase_boostback(target_latlng).
+phase_boostback(target_latlng, booster_landing_reserve).
 phase_coast_entry(target_latlng).
 phase_descent(target_latlng, booster_landing_reserve).
 phase_landing(target_latlng).

@@ -218,6 +218,47 @@ FOR part IN SHIP:PARTS {
 }
 IF NOT found_booster_procs { plog("    (none found)"). }
 
+// Build booster assemblies and print per-booster diagnostics.
+// Thresholds shown at two reference scenarios:
+//   radial: 500 m/s at 20 km  (early separation, low altitude)
+//   inline: 800 m/s at 65 km  (late separation, high altitude, higher effective fraction)
+// Adjust BOOSTBACK_DV_FRACTION / BOOSTBACK_DV_ALT_FACTOR in config.ks to tune.
+plog("  Booster assemblies (build_booster_assemblies):").
+build_booster_assemblies().
+FOR d IN BOOSTER_ASSEMBLIES:KEYS {
+    LOCAL asm IS BOOSTER_ASSEMBLIES[d].
+    plog("    Stg " + d + ": dry=" + ROUND(asm["dry_kg"]/1000,2) + "t" +
+         "  Isp=" + ROUND(asm["isp"],0) + "s" +
+         "  LF_cap=" + ROUND(asm["lf_cap"],0) +
+         "  fuel_parts=" + asm["fuel_parts"]:LENGTH).
+    LOCAL ref_scenarios IS LIST(LIST(500, 20000), LIST(800, 65000)).
+    LOCAL row IS "      thresholds:".
+    FOR s IN ref_scenarios {
+        LOCAL thresh IS get_booster_dv_threshold_pct_at(d, s[0], s[1]).
+        SET row TO row + "  " + ROUND(thresh,1) + "% @" + s[0] + "m/s," + ROUND(s[1]/1000,0) + "km".
+    }
+    plog(row).
+}
+
+// Dump engine module fields for the first booster engine found in SHIP:ENGINES.
+// If "isp" appears here with a non-zero value, GETFIELD("isp") is working correctly.
+// If missing or zero, set BOOSTER_VACUUM_ISP in config.ks to your engine's vacuum Isp.
+plog("  Engine module fields (first booster engine):").
+LOCAL diag_done IS FALSE.
+FOR eng IN SHIP:ENGINES {
+    IF NOT diag_done AND eng:DECOUPLEDIN > 0 {
+        LOCAL diag_mod IS "ModuleEngines".
+        IF eng:HASMODULE("ModuleEnginesFX") { SET diag_mod TO "ModuleEnginesFX". }
+        plog("    part=" + eng:NAME + " DCPL=" + eng:DECOUPLEDIN + " module=" + diag_mod).
+        plog("    ALLFIELDS (find the isp entry to confirm field name):").
+        FOR fname IN eng:GETMODULE(diag_mod):ALLFIELDS {
+            plog("      " + fname).
+        }
+        SET diag_done TO TRUE.
+    }
+}
+IF NOT diag_done { plog("    (no booster engines found in SHIP:ENGINES)"). }
+
 plog(" ").
 
 // =========================================================================

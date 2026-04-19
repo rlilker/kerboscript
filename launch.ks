@@ -125,6 +125,10 @@ FUNCTION setup_booster_processors {
     FOR part IN booster_parts {
         BOOSTER_PROCS:ADD(part:TAG).
     }
+
+    // Build per-booster assembly cache: live fuel-part refs, dry_kg, lf_cap, Isp.
+    // Used by check_staging_needed() every 0.1s via get_booster_fuel_pct().
+    build_booster_assemblies().
 }
 
 // =========================================================================
@@ -139,11 +143,14 @@ FUNCTION perform_staging {
     tlog("Staging initiated - booster fuel at " + fuel_log +
                 " (DECOUPLEDIN=" + next_stg + ", STAGE:NUMBER=" + current_stage + ")").
 
+    // Declared at function scope so the intermediate-stage timer reset below can read it
+    // even if ENABLE_BOOSTER_RECOVERY is FALSE or BOOSTER_PROCS is empty.
+    LOCAL separating IS LIST().
+
     // Signal only the boosters that are actually separating at this stage event.
     // Boosters at a different DECOUPLEDIN (e.g. booster_3 decoupling later) stay
     // in BOOSTER_PROCS to receive their DECOUPLE message when their stage fires.
     IF ENABLE_BOOSTER_RECOVERY AND BOOSTER_PROCS:LENGTH > 0 {
-        LOCAL separating IS LIST().
         LOCAL staying IS LIST().
         FOR tag IN BOOSTER_PROCS {
             LOCAL b_dcpl IS -1.
@@ -169,17 +176,25 @@ FUNCTION perform_staging {
             FOR tag IN staying {
                 BOOSTER_PROCS:ADD(tag).
             }
-            WAIT 0.3.  // Brief pause to let boosters cut throttle before decoupler fires
+            WAIT 1.5.  // Wait for booster message poll (0.5s interval) + throttle cut before decoupler fires
         } ELSE {
-            tlog("No booster DECOUPLEDIN matched stage " + current_stage + " -- no DECOUPLE sent").
+            tlog("No booster DECOUPLEDIN matched stage " + current_stage + " -- intermediate stage, firing").
         }
     }
 
-    // Fire the decoupler
+    // Fire the decoupler (or intermediate activation stage)
     STAGE.
     WAIT 1.0.
 
     tlog("Stage fired. Total boosters separated: " + BOOSTER_COUNT).
+
+    // If no booster matched this stage but boosters are still pending, reset the
+    // staging timer so check_staging_needed() fires immediately at the new STAGE:NUMBER.
+    // Handles any intermediate activation stages between launch and a booster's DECOUPLEDIN.
+    IF separating:LENGTH = 0 AND BOOSTER_PROCS:LENGTH > 0 {
+        SET LAST_STAGE_TIME TO 0.
+        tlog("Intermediate stage consumed -- staging timer reset for next stage").
+    }
 }
 
 // =========================================================================
@@ -246,7 +261,7 @@ FUNCTION phase_gravity_turn {
         IF b_cap > 0 { SET b_pct TO (b_fuel / b_cap) * 100. }
 
         // Check staging
-        IF check_staging_needed(STAGE_FUEL_THRESHOLD) {
+        IF check_staging_needed() {
             perform_staging().
         }
 
@@ -287,7 +302,7 @@ FUNCTION phase_coast_to_apoapsis {
 
     // Stage any remaining boosters before circularization — even if already above atmosphere
     UNTIL SHIP:ALTITUDE > BODY:ATM:HEIGHT OR get_next_booster_stage() < 0 {
-        IF check_staging_needed(STAGE_FUEL_THRESHOLD) {
+        IF check_staging_needed() {
             perform_staging().
         }
 

@@ -53,22 +53,27 @@ FUNCTION execute_flip {
 // Burns primarily retrograde (to stop the ballistic arc) with a small lean toward target.
 // Full throttle throughout; stops early if fuel reserve for landing is reached.
 FUNCTION execute_boostback {
-    PARAMETER target_latlng, max_burn_time IS 60, target_error IS 500.
+    PARAMETER target_latlng, max_burn_time IS 60, target_error IS 500, landing_reserve IS 0.
 
     tlog("Starting boostback burn...").
     tlog("Target: LAT=" + ROUND(target_latlng:LAT, 4) + " LON=" + ROUND(target_latlng:LNG, 4)).
 
     LOCAL start_time IS TIME:SECONDS.
 
-    // Record current fuel to calculate landing reserve
     LOCAL initial_fuel IS 0.
     FOR res IN SHIP:RESOURCES {
         IF res:NAME = "LiquidFuel" { SET initial_fuel TO initial_fuel + res:AMOUNT. }
     }
-    LOCAL landing_reserve IS initial_fuel * 0.30.
     tlog("Fuel: " + ROUND(initial_fuel, 0) + " LF  landing reserve: " + ROUND(landing_reserve, 0) + " LF").
 
     LOCK STEERING TO RETROGRADE.
+
+    // Cache impact prediction — predict_current_impact(400,1.0) runs 400 integration
+    // steps per call. Calling it every 0.1s = 4000 steps/sec which crashes kOS.
+    // Update every 2 seconds; accuracy is sufficient since trajectory changes slowly.
+    LOCAL last_predict_time IS TIME:SECONDS - 10.
+    LOCAL predicted_impact IS LATLNG(0, 0).
+    LOCAL error_distance IS 999999.
 
     UNTIL (TIME:SECONDS - start_time) > max_burn_time {
         // Check fuel reserve — stop if not enough left to land
@@ -89,9 +94,12 @@ FUNCTION execute_boostback {
             RETURN FALSE.
         }
 
-        // Predict landing point and check error
-        LOCAL predicted_impact IS predict_current_impact(400, 1.0).
-        LOCAL error_distance IS great_circle_distance(predicted_impact, target_latlng).
+        // Predict landing point and check error (rate-limited to every 2s)
+        IF (TIME:SECONDS - last_predict_time) >= 2.0 {
+            SET predicted_impact TO predict_current_impact(400, 1.0).
+            SET error_distance TO great_circle_distance(predicted_impact, target_latlng).
+            SET last_predict_time TO TIME:SECONDS.
+        }
 
         LOCAL bb_info IS "Burn: " + ROUND(TIME:SECONDS - start_time, 0) + "s  Err: " + ROUND(error_distance/1000, 1) + "km".
         show_booster_hud("BOOSTBACK BURN", bb_info).
@@ -122,8 +130,7 @@ FUNCTION execute_boostback {
     LOCK THROTTLE TO 0.
     tlog("Boostback timeout.").
 
-    LOCAL final_prediction IS predict_current_impact(400, 1.0).
-    LOCAL final_error IS great_circle_distance(final_prediction, target_latlng).
+    LOCAL final_error IS great_circle_distance(predicted_impact, target_latlng).
     tlog("Final error: " + ROUND(final_error/1000, 1) + "km").
 
     RETURN FALSE.

@@ -7,6 +7,12 @@
 
 WAIT UNTIL SHIP:UNPACKED.
 CLEARSCREEN.
+FOR p IN SHIP:PARTS {
+    IF p:HASMODULE("kOSProcessor") {
+        p:GETMODULE("kOSProcessor"):DOEVENT("Open Terminal").
+    }
+}
+WAIT 2.
 PRINT "Booting Launch System...".
 
 SWITCH TO 0.
