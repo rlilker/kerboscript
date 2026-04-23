@@ -369,11 +369,11 @@ FUNCTION main {
         WAIT 0.5.
     }
 
-    PRINT "T-10 seconds...".
     FROM {LOCAL t IS 10.} UNTIL t = 0 STEP {SET t TO t - 1.} DO {
         PRINT "T-" + t + " seconds...          " AT(0, 9).
         WAIT 1.
     }
+    CLEARSCREEN.
 
     tlog("LIFTOFF!").
     SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 1.0.

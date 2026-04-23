@@ -31,6 +31,11 @@ IF EXISTS("test.ks") {
 }
 
 IF EXISTS("launch.ks") {
-    PRINT "Tests Passed. Starting Launch Sequence...".
+    PRINT " ".
+    PRINT "Tests passed. Launching in 10 seconds - press Ctrl+C to abort.".
+    FROM {LOCAL t IS 10.} UNTIL t = 0 STEP {SET t TO t - 1.} DO {
+        PRINT "  " + t + "..." AT(0, TERMINAL:HEIGHT - 2).
+        WAIT 1.
+    }
     RUN launch.
 }

@@ -87,7 +87,9 @@ FUNCTION show_launch_hud {
     PRINT "Warning:  " + TEL_STAGE_WARN + "                              " AT(0, 6).
     PRINT "Status:   " + TEL_LAST_MSG + "                        " AT(0, 7).
     IF DEBUG_MODE {
-        PRINT "Debug:    " + TEL_DEBUG_MSG + "                    " AT(0, 8).
+        PRINT ("Debug:    " + TEL_DEBUG_MSG + "                                          "):SUBSTRING(0, 50) AT(0, 8).
+    } ELSE {
+        PRINT "                                                  " AT(0, 8).
     }
 }
 
@@ -142,7 +144,9 @@ FUNCTION show_booster_hud {
     }
     PRINT "Status: " + TEL_LAST_MSG + "                          " AT(0, 6).
     IF DEBUG_MODE {
-        PRINT "Debug:  " + TEL_DEBUG_MSG + "                      " AT(0, 7).
+        PRINT ("Debug:  " + TEL_DEBUG_MSG + "                                          "):SUBSTRING(0, 50) AT(0, 7).
+    } ELSE {
+        PRINT "                                                  " AT(0, 7).
     }
 }
 
