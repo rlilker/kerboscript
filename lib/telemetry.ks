@@ -26,6 +26,7 @@ RUNONCEPATH("0:/lib/util.ks").
 // Most recent tlog/tdebug messages — shown in HUD status rows.
 GLOBAL TEL_LAST_MSG IS "".
 GLOBAL TEL_DEBUG_MSG IS "".
+GLOBAL TEL_STAGE_WARN IS "".
 
 // Booster landing target — set by autoland_staging.ks; referenced by show_booster_hud.
 GLOBAL BOOSTER_TARGET IS LATLNG(0, 0).
@@ -83,7 +84,7 @@ FUNCTION show_launch_hud {
     PRINT "Apoapsis: " + ap_km + " km                           " AT(0, 3).
     PRINT "Pitch:    " + pitch_deg + "deg    Throttle: " + throttle_pct + "%     " AT(0, 4).
     PRINT "Booster:  " + b_fuel_pct + "% fuel  (DCPL=" + b_stg + " STG=" + stg_num + ")    " AT(0, 5).
-    PRINT "                                                      " AT(0, 6).
+    PRINT "Warning:  " + TEL_STAGE_WARN + "                              " AT(0, 6).
     PRINT "Status:   " + TEL_LAST_MSG + "                        " AT(0, 7).
     IF DEBUG_MODE {
         PRINT "Debug:    " + TEL_DEBUG_MSG + "                    " AT(0, 8).

@@ -211,6 +211,7 @@ FUNCTION phase_coast_entry {
     tlog("PHASE 4: Coast to Entry").
     LOCK STEERING TO RETROGRADE.
     LOCAL entry_burn_done IS FALSE.
+    LOCAL last_tlog_time IS TIME:SECONDS - 20.
     UNTIL SHIP:ALTITUDE < 20000 {
         IF SHIP:ALTITUDE < AIRBRAKE_DEPLOY_ALT AND NOT BRAKES {
             deploy_airbrakes().
@@ -225,9 +226,13 @@ FUNCTION phase_coast_entry {
         IF BRAKES { SET airbrake_status TO "Airbrakes: DEPLOYED". }
         ELSE { SET airbrake_status TO "Airbrakes: retracted". }
         show_booster_hud("COAST TO ENTRY", airbrake_status).
+        IF TIME:SECONDS - last_tlog_time >= 15 {
+            tlog("Coast: alt=" + ROUND(SHIP:ALTITUDE/1000, 1) + "km vel=" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + "m/s " + airbrake_status).
+            SET last_tlog_time TO TIME:SECONDS.
+        }
         WAIT 0.5.
     }
-    tlog("Entered lower atmosphere").
+    tlog("Entered lower atmosphere at " + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s").
 }
 
 FUNCTION phase_descent {

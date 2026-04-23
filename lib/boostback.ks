@@ -72,6 +72,7 @@ FUNCTION execute_boostback {
     // steps per call. Calling it every 0.1s = 4000 steps/sec which crashes kOS.
     // Update every 2 seconds; accuracy is sufficient since trajectory changes slowly.
     LOCAL last_predict_time IS TIME:SECONDS - 10.
+    LOCAL last_tlog_time IS TIME:SECONDS - 10.
     LOCAL predicted_impact IS LATLNG(0, 0).
     LOCAL error_distance IS 999999.
 
@@ -83,14 +84,14 @@ FUNCTION execute_boostback {
         }
         IF current_fuel <= landing_reserve {
             LOCK THROTTLE TO 0.
-            tlog("Boostback stopped - fuel reserve reached (" + ROUND(current_fuel, 0) + " LF remaining)").
+            tlog("Boostback stopped - fuel reserve reached (" + ROUND(current_fuel, 0) + " LF remaining). Trajectory err: " + ROUND(error_distance/1000, 1) + "km").
             RETURN FALSE.
         }
 
         // Stop when velocity is mostly cancelled — further burning is counterproductive
         IF SHIP:VELOCITY:SURFACE:MAG < 300 {
             LOCK THROTTLE TO 0.
-            tlog("Boostback stopped - velocity cancelled (" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s remaining)").
+            tlog("Boostback stopped - velocity cancelled (" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " m/s remaining). Trajectory err: " + ROUND(error_distance/1000, 1) + "km").
             RETURN FALSE.
         }
 
@@ -103,6 +104,16 @@ FUNCTION execute_boostback {
 
         LOCAL bb_info IS "Burn: " + ROUND(TIME:SECONDS - start_time, 0) + "s  Err: " + ROUND(error_distance/1000, 1) + "km".
         show_booster_hud("BOOSTBACK BURN", bb_info).
+
+        // Periodic file log — HUD is screen-only; without this, crashes leave no trace
+        IF TIME:SECONDS - last_tlog_time >= 5 {
+            LOCAL cur_lean IS ROUND(MIN(0.20, error_distance / 200000), 3).
+            LOCAL tilt IS ROUND(VANG(SHIP:FACING:VECTOR, RETROGRADE:VECTOR), 1).
+            LOCAL cur_lf IS 0.
+            FOR res IN SHIP:RESOURCES { IF res:NAME = "LiquidFuel" { SET cur_lf TO cur_lf + res:AMOUNT. } }
+            tlog("BB t=" + ROUND(TIME:SECONDS - start_time, 0) + "s vel=" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + " lean=" + cur_lean + " tilt=" + tilt + "deg err=" + ROUND(error_distance/1000, 1) + "km fuel=" + ROUND(cur_lf, 0)).
+            SET last_tlog_time TO TIME:SECONDS.
+        }
 
         IF error_distance < target_error {
             LOCK THROTTLE TO 0.

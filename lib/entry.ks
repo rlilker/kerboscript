@@ -91,6 +91,7 @@ FUNCTION coast_to_landing_altitude {
     RCS ON.
 
     LOCAL last_display    IS TIME:SECONDS.
+    LOCAL last_tlog       IS TIME:SECONDS - 100.  // force immediate first log entry
     LOCAL last_predict    IS TIME:SECONDS - 100.  // force immediate first prediction
     LOCAL last_fuel_check IS TIME:SECONDS - 100.  // force immediate first check
     LOCAL cached_impact   IS LATLNG(0, 0).
@@ -100,8 +101,8 @@ FUNCTION coast_to_landing_altitude {
     UNTIL get_true_altitude() < landing_start_altitude {
         LOCAL ship_alt IS SHIP:ALTITUDE.
 
-        // Prediction on a schedule: 30s above 30 km, 5s below
-        LOCAL predict_interval IS 30.
+        // Prediction on a schedule: 10s above 30 km, 5s below
+        LOCAL predict_interval IS 10.
         IF ship_alt < 30000 { SET predict_interval TO 5. }
 
         IF TIME:SECONDS - last_predict > predict_interval {
@@ -120,9 +121,14 @@ FUNCTION coast_to_landing_altitude {
             SET last_fuel_check TO TIME:SECONDS.
         }
 
-        // Throttle: engine nudge only when off-course, high enough, and fuel allows
+        // Throttle: engine nudge only when off-course, high enough, and fuel allows.
+        // At high altitude with large error, use more throttle for meaningful correction.
         IF distance_error > 500 AND ship_alt > 5000 AND can_nudge {
-            LOCK THROTTLE TO 0.05.
+            IF distance_error > 5000 AND ship_alt > 30000 {
+                LOCK THROTTLE TO 0.10.
+            } ELSE {
+                LOCK THROTTLE TO 0.05.
+            }
         } ELSE {
             LOCK THROTTLE TO 0.
         }
@@ -135,7 +141,7 @@ FUNCTION coast_to_landing_altitude {
             IF NOT BRAKES { deploy_airbrakes(). }
         }
 
-        // Telemetry once per second
+        // Telemetry once per second (screen) and every 10s (file)
         IF TIME:SECONDS - last_display > 1.0 {
             LOCAL airbrake_status IS "Airbrakes: retracted".
             IF BRAKES { SET airbrake_status TO "Airbrakes: DEPLOYED". }
@@ -143,6 +149,12 @@ FUNCTION coast_to_landing_altitude {
             IF THROTTLE > 0 { SET nudge_status TO "Nudge". }
             show_booster_hud(nudge_status + " (Err: " + ROUND(distance_error, 0) + "m)", airbrake_status).
             SET last_display TO TIME:SECONDS.
+        }
+        IF TIME:SECONDS - last_tlog > 10.0 {
+            LOCAL nudge_str IS "glide".
+            IF THROTTLE > 0 { SET nudge_str TO "nudge". }
+            tlog("Descent: alt=" + ROUND(ship_alt/1000, 1) + "km vel=" + ROUND(SHIP:VELOCITY:SURFACE:MAG, 0) + "m/s err=" + ROUND(distance_error, 0) + "m " + nudge_str + " canNudge=" + can_nudge).
+            SET last_tlog TO TIME:SECONDS.
         }
 
         // Tick rate: slower at high altitude where nothing changes fast

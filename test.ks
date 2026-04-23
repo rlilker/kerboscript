@@ -408,24 +408,6 @@ plog("    OK: time limit updated").
 plog(" ").
 
 // =========================================================================
-// SUMMARY
-// =========================================================================
-
-plog("========================================").
-plog(" TEST COMPLETE").
-plog("========================================").
-plog(" ").
-
-IF all_passed {
-    plog("✓ All checks passed — system ready for launch!").
-    plog(" ").
-    plog("To launch:    RUN launch.").
-    plog("Debug mode:   SET DEBUG_MODE TO TRUE.   (in kOS terminal before running)").
-} ELSE {
-    plog("✗ Some checks failed — review output above before launch.").
-}
-
-// =========================================================================
 // TEST 11: BOOSTER STAGING LOGIC
 // =========================================================================
 
@@ -561,6 +543,24 @@ IF arm_parts:LENGTH = 0 {
     }
 }
 plog(" ").
+
+// =========================================================================
+// SUMMARY
+// =========================================================================
+
+plog("========================================").
+plog(" TEST COMPLETE").
+plog("========================================").
+plog(" ").
+
+IF all_passed {
+    plog("✓ All checks passed — system ready for launch!").
+    plog(" ").
+    plog("To launch:    RUN launch.").
+    plog("Debug mode:   SET DEBUG_MODE TO TRUE.   (in kOS terminal before running)").
+} ELSE {
+    plog("✗ Some checks failed — review output above before launch.").
+}
 
 } // end IF libs_ok
 

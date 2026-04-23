@@ -260,8 +260,21 @@ FUNCTION phase_gravity_turn {
         LOCAL b_pct IS 0.
         IF b_cap > 0 { SET b_pct TO (b_fuel / b_cap) * 100. }
 
+        // Staging warning: alert when booster fuel is within 3% of the separation threshold
+        IF b_stg >= 0 {
+            LOCAL stg_threshold IS get_booster_dv_threshold_pct(b_stg).
+            IF b_pct < stg_threshold + 3 {
+                SET TEL_STAGE_WARN TO ">>> BOOSTER SEPARATION IMMINENT <<<".
+            } ELSE {
+                SET TEL_STAGE_WARN TO "".
+            }
+        } ELSE {
+            SET TEL_STAGE_WARN TO "".
+        }
+
         // Check staging
         IF check_staging_needed() {
+            SET TEL_STAGE_WARN TO "".
             perform_staging().
         }
 
