@@ -97,13 +97,14 @@ FUNCTION coast_to_landing_altitude {
     LOCAL cached_impact   IS LATLNG(0, 0).
     LOCAL distance_error  IS 9999.
     LOCAL can_nudge       IS TRUE.
+    LOCAL entry_burn_done IS FALSE.
 
     UNTIL get_true_altitude() < landing_start_altitude {
         LOCAL ship_alt IS SHIP:ALTITUDE.
 
-        // Prediction on a schedule: 10s above 30 km, 5s below
-        LOCAL predict_interval IS 10.
-        IF ship_alt < 30000 { SET predict_interval TO 5. }
+        // Prediction on a schedule: 5s above 30 km, 3s below
+        LOCAL predict_interval IS 5.
+        IF ship_alt < 30000 { SET predict_interval TO 3. }
 
         IF TIME:SECONDS - last_predict > predict_interval {
             SET cached_impact  TO predict_current_impact(400, 1.0).
@@ -121,14 +122,15 @@ FUNCTION coast_to_landing_altitude {
             SET last_fuel_check TO TIME:SECONDS.
         }
 
-        // Throttle: engine nudge only when off-course, high enough, and fuel allows.
-        // At high altitude with large error, use more throttle for meaningful correction.
-        IF distance_error > 500 AND ship_alt > 5000 AND can_nudge {
-            IF distance_error > 5000 AND ship_alt > 30000 {
-                LOCK THROTTLE TO 0.10.
-            } ELSE {
-                LOCK THROTTLE TO 0.05.
-            }
+        // Throttle: tiered engine nudge toward target when off-course and fuel allows.
+        // Higher altitude = more throttle since there's more time to convert dv into range.
+        // Booster typically enters this loop from ~40-50 km with up to 60 km of error.
+        IF distance_error > 5000 AND ship_alt > 30000 AND can_nudge {
+            LOCK THROTTLE TO 0.30.
+        } ELSE IF distance_error > 5000 AND ship_alt > 15000 AND can_nudge {
+            LOCK THROTTLE TO 0.15.
+        } ELSE IF distance_error > 500 AND ship_alt > 5000 AND can_nudge {
+            LOCK THROTTLE TO 0.05.
         } ELSE {
             LOCK THROTTLE TO 0.
         }
@@ -139,6 +141,14 @@ FUNCTION coast_to_landing_altitude {
         // Airbrakes
         IF ship_alt < 40000 AND ship_alt > 1000 {
             IF NOT BRAKES { deploy_airbrakes(). }
+        }
+
+        // Entry burn: fire once when speed is high at low altitude (handles case where
+        // phase_coast_entry is skipped and this function runs from boostback-end altitude).
+        IF NOT entry_burn_done AND ship_alt < ENTRY_BURN_ALTITUDE {
+            IF check_and_execute_entry_burn(ENTRY_BURN_SPEED, ENTRY_BURN_ALTITUDE) {
+                SET entry_burn_done TO TRUE.
+            }
         }
 
         // Telemetry once per second (screen) and every 10s (file)

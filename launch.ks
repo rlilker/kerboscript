@@ -207,7 +207,15 @@ FUNCTION phase_vertical_ascent {
     LOCK STEERING TO HEADING(90, 90).  // East, vertical
     LOCK THROTTLE TO 1.0.
 
-    WAIT UNTIL SHIP:ALTITUDE > TURN_START_ALTITUDE.
+    UNTIL SHIP:ALTITUDE > TURN_START_ALTITUDE {
+        show_launch_hud(
+            "VERTICAL ASCENT",
+            ROUND(SHIP:ALTITUDE/1000, 1),
+            ROUND(SHIP:APOAPSIS/1000, 1),
+            90, 100, 100, -1, STAGE:NUMBER
+        ).
+        WAIT 0.2.
+    }
 
     tlog("Reached turn start altitude").
 }

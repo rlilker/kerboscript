@@ -121,13 +121,14 @@ FUNCTION execute_boostback {
             RETURN TRUE.
         }
 
-        // Steering: retrograde with small lean toward KSC.
-        // Lean is fixed at 20% max — ensures 80% retrograde (velocity cancellation)
-        // and 20% correction (trajectory bend toward KSC).
-        // Use current position bearing (not predicted impact) for stability.
-        LOCAL target_bearing IS bearing_to_target(SHIP:GEOPOSITION, target_latlng).
+        // Steering: retrograde with lean toward KSC.
+        // Bearing is computed from predicted impact to target (not current ship position)
+        // so the correction vector points in the direction that actually closes the gap.
+        // Lean factor scales with error, capped at 30% — enough lateral correction
+        // to close 60+ km gaps while retaining 70% retrograde for velocity cancellation.
+        LOCAL target_bearing IS bearing_to_target(predicted_impact, target_latlng).
         LOCAL correction_vec IS heading_vector(target_bearing, 0).
-        LOCAL lean_factor IS MIN(0.20, error_distance / 200000).
+        LOCAL lean_factor IS MIN(0.30, error_distance / 100000).
         LOCAL steer_vec IS ((1 - lean_factor) * RETROGRADE:VECTOR +
                             lean_factor * correction_vec):NORMALIZED.
         LOCK STEERING TO steer_vec.

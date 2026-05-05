@@ -295,7 +295,6 @@ tlog("Initial LF: " + ROUND(init_lf, 0) + "  Landing reserve: " + ROUND(booster_
 phase_separation_coast(target_latlng).
 phase_flip().
 phase_boostback(target_latlng, booster_landing_reserve).
-phase_coast_entry(target_latlng).
 phase_descent(target_latlng, booster_landing_reserve).
 phase_landing(target_latlng).
 phase_post_landing(target_latlng).
